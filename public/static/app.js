@@ -71,6 +71,7 @@ const SECTION_LABELS = {
   landing:   'Landing Page Generator',
   ads:       'Google Ads Generator',
   seo:       'SEO Content Generator',
+  keywords:  'Keyword Research',
   publish:   'Batch Publish',
   leads:     'Inbound Leads'
 };
@@ -128,7 +129,7 @@ async function loadCompanies() {
 }
 
 function _populateCompanySelects() {
-  ['lp-company', 'ads-company', 'seo-company'].forEach(id => {
+  ['lp-company', 'ads-company', 'seo-company', 'kw-company'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     while (el.options.length > 1) el.remove(1);
@@ -465,6 +466,239 @@ function fillAds(domain, keyword, service, co) {
   document.getElementById('ads-service').value = service;
   document.getElementById('ads-company').value = co;
   showSection('ads');
+}
+
+// ── KEYWORD RESEARCH ──────────────────────────────────────────────────────
+
+let allKeywords     = [];
+let filteredKeywords = [];
+let lastKwResearch  = null;
+
+const INTENT_CFG = {
+  emergency:     { icon: '🚨', color: '#f87171', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.3)' },
+  commercial:    { icon: '💰', color: '#fbbf24', bg: 'rgba(251,191,36,0.10)',  border: 'rgba(251,191,36,0.3)'  },
+  local:         { icon: '📍', color: '#60a5fa', bg: 'rgba(96,165,250,0.10)',  border: 'rgba(96,165,250,0.3)'  },
+  informational: { icon: '📚', color: '#94a3b8', bg: 'rgba(148,163,184,0.10)', border: 'rgba(148,163,184,0.25)' }
+};
+
+async function runKeywordResearch() {
+  const company   = document.getElementById('kw-company').value;
+  const territory = document.getElementById('kw-territory').value.trim();
+  const niche     = document.getElementById('kw-niche').value.trim();
+  const radius    = document.getElementById('kw-radius').value;
+
+  if (!territory) { toast('Enter a territory (e.g. Ottawa, ON)', 'error'); return; }
+  if (!niche)     { toast('Enter a service or niche', 'error'); return; }
+
+  const btn = document.getElementById('kw-run-btn');
+  btn.textContent = '⏳ Researching…';
+  btn.disabled = true;
+
+  try {
+    const r = await fetch('/api/keywords/research', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ company_key: company || null, territory, niche, radius })
+    });
+    const data = await r.json();
+    if (!r.ok) { toast(data.error || 'Research failed', 'error'); return; }
+
+    lastKwResearch  = data;
+    allKeywords     = data.keywords || [];
+    filteredKeywords = allKeywords;
+
+    // Connect banner
+    const banner = document.getElementById('kw-connect-banner');
+    if (data.connect_message) {
+      document.getElementById('kw-connect-msg').textContent = data.connect_message;
+      banner.style.display = '';
+    } else {
+      banner.style.display = 'none';
+    }
+
+    // Sources status
+    _renderKwSources(data.sources || {});
+
+    // Cached badge
+    const cachedBadge = document.getElementById('kw-cached-badge');
+    if (cachedBadge) cachedBadge.style.display = data.cached ? '' : 'none';
+
+    // Reset filter tabs
+    document.querySelectorAll('.kw-ftab').forEach(t => t.classList.remove('active'));
+    const allTab = document.querySelector('.kw-ftab');
+    if (allTab) allTab.classList.add('active');
+
+    renderKeywordResults(allKeywords);
+    toast(`${allKeywords.length} keywords found${data.cached ? ' (cached — 7d TTL)' : ''}`);
+  } catch(e) {
+    toast('Research failed: ' + e.message, 'error');
+  } finally {
+    btn.textContent = '🎯 Research Keywords';
+    btn.disabled = false;
+  }
+}
+
+function _renderKwSources(sources) {
+  const card = document.getElementById('kw-sources-card');
+  const list = document.getElementById('kw-sources-list');
+  card.style.display = '';
+  const defs = [
+    { key: 'planner',        label: 'Google Keyword Planner', icon: '📊', note: 'Volume + CPC + Competition' },
+    { key: 'trends',         label: 'Google Trends',          icon: '📈', note: 'Seasonal demand curve' },
+    { key: 'search_console', label: 'Search Console',         icon: '🔍', note: 'Impression + CTR data' }
+  ];
+  list.innerHTML = defs.map(s => {
+    const on = !!sources[s.key];
+    return `<div class="kw-source-pill" style="color:${on ? '#4ade80' : 'var(--tx3)'};background:${on ? 'rgba(74,222,128,0.06)' : 'var(--bg-s)'};border-color:${on ? 'rgba(74,222,128,0.3)' : 'var(--bd)'}">
+      <span>${s.icon}</span>
+      <div>
+        <div style="font-size:11px">${s.label}</div>
+        <div style="font-size:10px;opacity:0.7">${on ? '✓ Live' : '○ Not connected'} — ${s.note}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _kwSparkline(values) {
+  if (!values || values.length < 2) return '';
+  const max = Math.max(...values, 1);
+  const W = 56, H = 18;
+  const pts = values.map((v, i) =>
+    `${Math.round(i * W / (values.length - 1))},${Math.round(H - (v / max) * H)}`
+  ).join(' ');
+  const trend = values.slice(-3).reduce((a,b) => a+b,0) > values.slice(0,3).reduce((a,b) => a+b,0);
+  return `<svg width="${W}" height="${H}" style="display:inline-block;vertical-align:middle;margin-left:6px" title="12-month trend">
+    <polyline points="${pts}" fill="none" stroke="${trend ? '#4ade80' : '#60a5fa'}" stroke-width="1.5" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+function renderKeywordResults(keywords) {
+  const card  = document.getElementById('kw-results-card');
+  const title = document.getElementById('kw-result-count');
+  const tbody = document.getElementById('kw-tbody');
+  card.style.display = '';
+  title.textContent = `${keywords.length} Keywords — sorted by score`;
+
+  if (!keywords.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--tx3);padding:20px">No keywords returned. Try adjusting territory or niche inputs.</td></tr>';
+    return;
+  }
+
+  const maxVol = Math.max(...keywords.map(k => k.volume || 0), 1);
+
+  tbody.innerHTML = keywords.map((kw, i) => {
+    const ic     = INTENT_CFG[kw.intent_type] || INTENT_CFG.informational;
+    const score  = kw.score || 0;
+    const sColor = score >= 70 ? '#4ade80' : score >= 50 ? '#fbbf24' : '#94a3b8';
+    const sBorder= score >= 70 ? 'rgba(74,222,128,0.4)' : score >= 50 ? 'rgba(251,191,36,0.4)' : 'rgba(148,163,184,0.2)';
+    const volBar = kw.volume > 0
+      ? `<span class="kw-vol-bar" style="width:${Math.round((kw.volume / maxVol) * 48)}px"></span>`
+      : '';
+    const vol    = kw.volume != null ? kw.volume.toLocaleString() + volBar : `<span style="color:var(--tx3)">—</span>`;
+    const cpc    = kw.cpc    != null ? '$' + Number(kw.cpc).toFixed(2)     : `<span style="color:var(--tx3)">—</span>`;
+    const comp   = kw.competition != null
+      ? `<span style="color:${kw.competition < 30 ? '#4ade80' : kw.competition < 60 ? '#fbbf24' : '#f87171'}">${kw.competition}%</span>`
+      : `<span style="color:var(--tx3)">—</span>`;
+    const spark  = kw.trend_values ? _kwSparkline(kw.trend_values) : '';
+    const srcBadge = `<span class="kw-source">${kw.source || 'manual'}</span>`;
+    const domHtml = kw.suggested_domain
+      ? `<a href="https://${kw.suggested_domain}" target="_blank" rel="noopener" style="color:#60a5fa;font-size:11px;font-weight:600">${kw.suggested_domain}</a>`
+      : `<span style="color:var(--tx3);font-size:11px">—</span>`;
+
+    return `<tr>
+      <td>
+        <div style="font-weight:600;color:var(--tx);font-size:12px">${kw.keyword}${srcBadge}</div>
+        ${spark}
+      </td>
+      <td style="white-space:nowrap">${vol}</td>
+      <td style="color:#4ade80;font-weight:600">${cpc}</td>
+      <td>${comp}</td>
+      <td><span class="kw-badge" style="color:${ic.color};background:${ic.bg};border-color:${ic.border}">${ic.icon} ${kw.intent_type}</span></td>
+      <td><span class="kw-match">${kw.match_type}</span></td>
+      <td><span class="kw-score" style="color:${sColor};border-color:${sBorder}">${score}</span></td>
+      <td>${domHtml}</td>
+      <td style="white-space:nowrap">
+        <button class="qf" onclick="saveOneKeyword(${i})" title="Save to D1" style="font-size:11px">💾</button>
+        <button class="qf qf-ads" onclick="sendKwToAds(${i})" title="Send to Ads Generator" style="font-size:11px">→ ADS</button>
+        <button class="qf qf-lp" onclick="sendKwToLP(${i})" title="Send to Landing Page Generator" style="font-size:11px">→ LP</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterKeywords(filter, el) {
+  document.querySelectorAll('.kw-ftab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  filteredKeywords = filter === 'all' ? allKeywords : allKeywords.filter(k => k.intent_type === filter);
+  renderKeywordResults(filteredKeywords);
+}
+
+async function saveOneKeyword(idx) {
+  const kw = filteredKeywords[idx];
+  if (!kw) return;
+  try {
+    const r = await fetch('/api/keywords/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords: [kw] })
+    });
+    const d = await r.json();
+    if (r.ok) toast('✓ Keyword saved to D1');
+    else toast(d.error || 'Save failed', 'error');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+async function saveAllKeywords() {
+  if (!allKeywords.length) { toast('Run research first', 'error'); return; }
+  try {
+    const r = await fetch('/api/keywords/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords: allKeywords })
+    });
+    const d = await r.json();
+    if (r.ok) toast(`✓ ${d.saved} keywords saved to D1`);
+    else toast(d.error || 'Save failed', 'error');
+  } catch(e) { toast('Error: ' + e.message, 'error'); }
+}
+
+function sendKwToAds(idx) {
+  const kw = filteredKeywords[idx];
+  if (!kw) return;
+  document.getElementById('ads-keyword').value = kw.keyword;
+  if (kw.suggested_domain) document.getElementById('ads-domain').value = kw.suggested_domain;
+  showSection('ads');
+  toast('Keyword loaded into Ads Generator');
+}
+
+function sendKwToLP(idx) {
+  const kw = filteredKeywords[idx];
+  if (!kw) return;
+  document.getElementById('lp-keyword').value = kw.keyword;
+  if (kw.suggested_domain) setDomainDDDisplay('lp', kw.suggested_domain);
+  showSection('landing');
+  toast('Keyword loaded into Landing Page Generator');
+}
+
+function exportKeywordsCSV() {
+  if (!allKeywords.length) { toast('Run research first', 'error'); return; }
+  const headers = ['Keyword','Volume','CPC (CAD)','Competition','Intent','Match Type','Score','Territory','Suggested Domain','Source'];
+  const rows = allKeywords.map(k => [
+    `"${k.keyword}"`,
+    k.volume ?? '',
+    k.cpc != null ? Number(k.cpc).toFixed(2) : '',
+    k.competition ?? '',
+    k.intent_type,
+    k.match_type,
+    k.score,
+    k.territory || '',
+    k.suggested_domain || '',
+    k.source || ''
+  ]);
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `keywords-${(lastKwResearch?.territory || 'export').replace(/[^a-z0-9]/gi, '-')}-${Date.now()}.csv`;
+  a.click();
+  toast(`Exported ${allKeywords.length} keywords`);
 }
 
 // ── LANDING PAGE GENERATOR ────────────────────────────────────────────────

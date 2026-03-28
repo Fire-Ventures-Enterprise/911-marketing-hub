@@ -214,6 +214,265 @@ app.use('/static/*', serveStatic({ root: './' }))
 app.get('/favicon.ico', (c) => c.body(null, 204))
 app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /api/\n'))
 
+// ── KEYWORD RESEARCH HELPERS ─────────────────────────────────────────────
+
+const GEO_TARGETS: Record<string, number> = {
+  'ottawa':    9061693,
+  'ontario':   20152,
+  'canada':    2124,
+  'toronto':   9061718,
+  'montreal':  9061704,
+  'vancouver': 9061742,
+  'calgary':   9061686,
+  'edmonton':  9061692
+}
+
+function scoreKeyword(
+  params: { text: string; volume: number; competition: number; cpc: number; territory: string },
+  domainTexts: string[]
+): { score: number; intent: string; matchType: string } {
+  const lower = params.text.toLowerCase()
+  const terr  = (params.territory || '').toLowerCase().split(',')[0].trim()
+
+  const emergencyTerms  = ['emergency','urgent','flood','burst','backup','sewage','24/7','24 hour','immediate','asap','disaster','water damage','fire damage','smoke damage','mold removal','biohazard','sewage backup','frozen pipe']
+  const commercialTerms = ['cost','price','hire','near me','best','affordable','cheap','quote','estimate','company','service','contractor','specialist','professional']
+  const infoTerms       = ['how to','what is','what are','why is','diy','tips','guide',' vs ',' vs.','difference between','can i']
+
+  let intent = 'informational'
+  if (emergencyTerms.some(t => lower.includes(t)))  intent = 'emergency'
+  else if (commercialTerms.some(t => lower.includes(t))) intent = 'commercial'
+  else if (terr && lower.includes(terr))             intent = 'local'
+  else if (infoTerms.some(t => lower.includes(t)))  intent = 'informational'
+
+  const vol       = Math.max(0, params.volume || 0)
+  const volScore  = vol > 10000 ? 40 : vol > 5000 ? 35 : vol > 1000 ? 28 : vol > 500 ? 22 : vol > 100 ? 15 : vol > 0 ? 8 : 0
+  const compScore = Math.round((1 - Math.min(params.competition, 100) / 100) * 25)
+  const intentScore = intent === 'emergency' ? 20 : intent === 'commercial' ? 15 : intent === 'local' ? 10 : 5
+  const geoScore  = terr && lower.includes(terr) ? 10 : lower.includes('ottawa') ? 7 : 3
+  const emdBonus  = domainTexts.some(d => {
+    const base = d.replace(/\.(com|ca|net|org)$/, '').replace(/-/g, ' ').toLowerCase()
+    return lower === base || lower.split(' ').join('').includes(base.split(' ').join(''))
+  }) ? 5 : 0
+
+  const score     = Math.min(100, volScore + compScore + intentScore + geoScore + emdBonus)
+  const matchType = (intent === 'emergency' || params.competition < 30) ? 'Exact' : 'Phrase'
+
+  return { score, intent, matchType }
+}
+
+async function refreshGoogleToken(env: Bindings & Record<string, any>): Promise<string | null> {
+  try {
+    const stored = await env.KV?.get('google_oauth_tokens')
+    if (!stored) return null
+    const tokens = JSON.parse(stored)
+    const ageSeconds = (Date.now() - (tokens.stored_at || 0)) / 1000
+    if (ageSeconds < (tokens.expires_in || 3600) - 60) return tokens.access_token || null
+    if (!tokens.refresh_token) return null
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ refresh_token: tokens.refresh_token, client_id: env.GOOGLE_ADS_CLIENT_ID || '', client_secret: env.GOOGLE_ADS_CLIENT_SECRET || '', grant_type: 'refresh_token' })
+    })
+    const refreshed = await res.json() as any
+    if (refreshed.access_token) {
+      await env.KV.put('google_oauth_tokens', JSON.stringify({ ...tokens, access_token: refreshed.access_token, stored_at: Date.now() }), { expirationTtl: 60 * 60 * 24 * 30 })
+      return refreshed.access_token
+    }
+    return null
+  } catch { return null }
+}
+
+async function fetchGoogleTrends(keywords: string[], geo: string): Promise<Map<string, number[]>> {
+  try {
+    const req = {
+      comparisonItem: keywords.slice(0, 5).map(kw => ({ keyword: kw, geo, time: 'today 12-m' })),
+      category: 0, property: ''
+    }
+    const exploreUrl = `https://trends.google.com/trends/api/explore?hl=en-US&tz=300&req=${encodeURIComponent(JSON.stringify(req))}&geo=${geo}`
+    const exploreRes = await fetch(exploreUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    })
+    if (!exploreRes.ok) return new Map()
+    const raw = await exploreRes.text()
+    const exploreData = JSON.parse(raw.replace(/^\)\]\}'\n/, ''))
+    const timeWidget = exploreData.widgets?.find((w: any) => w.id === 'TIMESERIES')
+    if (!timeWidget?.token) return new Map()
+
+    const mlUrl = `https://trends.google.com/trends/api/widgetdata/multiline?hl=en-US&tz=300&req=${encodeURIComponent(JSON.stringify(timeWidget.request))}&token=${encodeURIComponent(timeWidget.token)}&geo=${geo}`
+    const mlRes = await fetch(mlUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' } })
+    if (!mlRes.ok) return new Map()
+    const mlData = JSON.parse((await mlRes.text()).replace(/^\)\]\}'\n/, ''))
+
+    const result = new Map<string, number[]>()
+    const timeline = mlData?.default?.timelineData || []
+    keywords.forEach((kw, i) => {
+      const values: number[] = timeline.map((p: any) => Array.isArray(p.value) ? (p.value[i] || 0) : 0)
+      if (values.some((v: number) => v > 0)) result.set(kw, values)
+    })
+    return result
+  } catch { return new Map() }
+}
+
+// ── KEYWORD RESEARCH ROUTES ───────────────────────────────────────────────
+
+app.post('/api/keywords/research', async (c) => {
+  try {
+    const { company_key, territory, niche, radius = 'city', seed_keywords = [] } = await c.req.json()
+    if (!territory || !niche) return c.json({ error: 'territory and niche required' }, 400)
+
+    const cacheKey = `kw:${company_key || 'all'}:${territory.toLowerCase().replace(/\s+/g, '-')}:${niche.toLowerCase().replace(/\s+/g, '-')}`
+    if (c.env?.KV) {
+      const cached = await c.env.KV.get(cacheKey)
+      if (cached) return c.json({ ...JSON.parse(cached), cached: true })
+    }
+
+    // Seed keywords from D1 domain army
+    let domainSeeds: string[] = [...(seed_keywords as string[])]
+    let domainTexts: string[] = []
+    if (c.env?.DB) {
+      const q   = company_key
+        ? 'SELECT domain, keyword, service FROM domains WHERE company = ? AND authorized = 1 ORDER BY priority ASC LIMIT 20'
+        : 'SELECT domain, keyword, service FROM domains WHERE authorized = 1 ORDER BY priority ASC LIMIT 20'
+      const res = company_key
+        ? await c.env.DB.prepare(q).bind(company_key).all()
+        : await c.env.DB.prepare(q).all()
+      const doms = (res.results || []) as any[]
+      domainTexts = doms.map((d: any) => d.domain)
+      doms.forEach((d: any) => {
+        if (d.keyword && !domainSeeds.includes(d.keyword)) domainSeeds.push(d.keyword)
+      })
+    }
+    // Add niche + territory combos as seeds
+    const cityName = territory.split(',')[0].trim().toLowerCase()
+    ;[niche, `${niche} ${cityName}`, `emergency ${niche}`, `best ${niche} ${cityName}`, `${niche} cost`, `${niche} near me`].forEach(s => {
+      if (!domainSeeds.includes(s)) domainSeeds.push(s)
+    })
+    domainSeeds = [...new Set(domainSeeds)].slice(0, 20)
+
+    const sources = { planner: false, trends: false, search_console: false }
+    let keywords: any[] = []
+    let connectMessage: string | null = null
+
+    // ── Source 1: Google Keyword Planner ─────────────────────────────────
+    const devToken    = (c.env as any)?.GOOGLE_ADS_DEVELOPER_TOKEN
+    const customerId  = (c.env as any)?.GOOGLE_ADS_CUSTOMER_ID
+    const accessToken = c.env?.KV ? await refreshGoogleToken(c.env as any) : null
+
+    if (devToken && customerId && accessToken) {
+      try {
+        const geoId = GEO_TARGETS[cityName] || GEO_TARGETS['canada']
+        const plannerRes = await fetch(
+          `https://googleads.googleapis.com/v18/customers/${customerId}/keywordPlanIdeas:generateKeywordIdeas`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${accessToken}`, 'developer-token': devToken, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              language: { resourceName: 'languageConstants/1000' },
+              geoTargetConstants: [`geoTargetConstants/${geoId}`],
+              keywordSeed: { keywords: domainSeeds.slice(0, 10) },
+              keywordPlanNetwork: 'GOOGLE_SEARCH'
+            })
+          }
+        )
+        if (plannerRes.ok) {
+          const plannerData = await plannerRes.json() as any
+          for (const r of (plannerData.results || [])) {
+            const m   = r.keywordIdeaMetrics || {}
+            const vol = parseInt(m.avgMonthlySearches || '0')
+            const comp = parseInt(m.competitionIndex || '0')
+            const cpc  = parseInt(m.averageCpcMicros || '0') / 1_000_000
+            const { score, intent, matchType } = scoreKeyword({ text: r.text, volume: vol, competition: comp, cpc, territory }, domainTexts)
+            const sugDomain = domainTexts.find(d => d.replace(/\.(com|ca|net|org)$/, '').replace(/-/g, ' ').toLowerCase().includes(r.text.split(' ')[0])) || null
+            keywords.push({ keyword: r.text, volume: vol, cpc, competition: comp, intent_type: intent, match_type: matchType, score, territory, suggested_domain: sugDomain, source: 'planner' })
+          }
+          sources.planner = true
+        }
+      } catch (e: any) { console.error('[KW Planner]', e?.message) }
+    } else {
+      connectMessage = !devToken ? 'Connect Google Ads to unlock real volume data — add GOOGLE_ADS_DEVELOPER_TOKEN to environment variables'
+        : !customerId ? 'Add GOOGLE_ADS_CUSTOMER_ID to environment variables'
+        : 'Connect Google Ads OAuth to unlock real volume data'
+    }
+
+    // ── Source 2: Google Trends (free, no key) ────────────────────────────
+    try {
+      const trendsData = await fetchGoogleTrends(domainSeeds.slice(0, 5), 'CA')
+      if (trendsData.size > 0) {
+        sources.trends = true
+        for (const [kw, values] of trendsData.entries()) {
+          const avgTrend  = values.length ? Math.round(values.reduce((a: number, b: number) => a + b, 0) / values.length) : 0
+          const recent3   = values.slice(-3).reduce((a: number, b: number) => a + b, 0)
+          const older3    = values.slice(0, 3).reduce((a: number, b: number) => a + b, 0)
+          const trendBoost = recent3 > older3 ? 3 : 0
+          const existing  = keywords.find((k: any) => k.keyword === kw)
+          if (existing) {
+            existing.trend_values = values
+            existing.trend_avg    = avgTrend
+            existing.score        = Math.min(100, existing.score + trendBoost)
+          } else if (!sources.planner) {
+            // No planner data — build entry from trends signal only
+            const estVol = avgTrend * 10
+            const { score, intent, matchType } = scoreKeyword({ text: kw, volume: estVol, competition: 50, cpc: 0, territory }, domainTexts)
+            const sugDomain = domainTexts.find(d => d.replace(/\.(com|ca|net|org)$/, '').replace(/-/g, ' ').toLowerCase().includes(kw.split(' ')[0])) || null
+            keywords.push({ keyword: kw, volume: null, cpc: null, competition: null, intent_type: intent, match_type: matchType, score: Math.min(100, score + trendBoost), territory, trend_values: values, trend_avg: avgTrend, suggested_domain: sugDomain, source: 'trends' })
+          }
+        }
+      }
+    } catch (e: any) { console.error('[Trends]', e?.message) }
+
+    // ── Source 3: Search Console — placeholder ────────────────────────────
+    // Requires additional OAuth scope: https://www.googleapis.com/auth/webmasters.readonly
+    // Wire endpoint structure here; activate when search console tokens are present
+    sources.search_console = false
+
+    keywords.sort((a: any, b: any) => b.score - a.score)
+
+    const result = { keywords: keywords.slice(0, 100), sources, connect_message: connectMessage, territory, niche, radius, generated_at: new Date().toISOString(), cached: false }
+    if (c.env?.KV && keywords.length > 0) await c.env.KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 60 * 60 * 24 * 7 })
+    return c.json(result)
+  } catch (err: any) {
+    return c.json({ error: 'Research failed', detail: err?.message }, 500)
+  }
+})
+
+app.post('/api/keywords/save', async (c) => {
+  if (!c.env?.DB) return c.json({ error: 'DB not configured' }, 500)
+  const { keywords: kwList, domain_id, company_id } = await c.req.json()
+  if (!Array.isArray(kwList) || !kwList.length) return c.json({ error: 'keywords array required' }, 400)
+  const now = new Date().toISOString()
+  let saved = 0
+  for (const kw of kwList) {
+    try {
+      await c.env.DB.prepare(
+        'INSERT INTO keywords (domain_id, company_id, keyword, volume, cpc, competition, intent_type, match_type, score, territory, source, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+      ).bind(domain_id || null, company_id || null, kw.keyword, kw.volume || 0, kw.cpc || 0, kw.competition || 0, kw.intent_type || 'informational', kw.match_type || 'Phrase', kw.score || 0, kw.territory || null, kw.source || 'manual', now).run()
+      saved++
+    } catch { /* skip duplicates */ }
+  }
+  return c.json({ success: true, saved })
+})
+
+app.get('/api/keywords/saved', async (c) => {
+  if (!c.env?.DB) return c.json({ keywords: [] })
+  const user       = c.get('user')
+  const domain_id  = c.req.query('domain_id')
+  const company_id = c.req.query('company_id')
+  let q = 'SELECT * FROM keywords'
+  const params: any[] = []
+  const where: string[] = []
+  if (domain_id)  { where.push('domain_id = ?');  params.push(parseInt(domain_id)) }
+  if (company_id) { where.push('company_id = ?'); params.push(parseInt(company_id)) }
+  if (user && user.role !== 'super_admin' && user.company_id) { where.push('company_id = ?'); params.push(user.company_id) }
+  if (where.length) q += ' WHERE ' + where.join(' AND ')
+  q += ' ORDER BY score DESC, created_at DESC LIMIT 200'
+  const res = params.length
+    ? await c.env.DB.prepare(q).bind(...params).all()
+    : await c.env.DB.prepare(q).all()
+  return c.json({ keywords: res.results || [] })
+})
+
 app.get('/api/status', (c) => {
   const all = [...DOMAINS.emergency, ...DOMAINS.renovation, ...DOMAINS.kitchen]
   return c.json({

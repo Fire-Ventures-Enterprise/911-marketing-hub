@@ -27,7 +27,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`
 
 ### KV Namespace
 - **Name:** `Services-Leads-Marketing-Hub-KV`
@@ -65,6 +65,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0004_domain_auth.sql` | Adds `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` to `domains`; pre-authorizes all 33 existing domains |
 | `migrations/0005_domain_auth_correction.sql` | Corrects 0004: resets Building and Parked domains to `authorized = 0`; only Active domains remain authorized |
 | `migrations/0006_territory_niche.sql` | Documents `territory` and `niche_angle` columns (added directly to D1 before migration file existed); adds `idx_domains_territory` and `idx_domains_niche_angle` indexes |
+| `migrations/0007_keywords.sql` | Creates `keywords` table + 6 indexes; stores keyword research results linked to domains and companies |
 
 ---
 
@@ -120,6 +121,17 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Dropdown groups domains by `d.co` (company key); company display name and icon come from `allCompanies` with a key-based fallback — never hardcoded
 - `filterDomainDD` searches across domain, keyword, service, and co fields; the group header shows "N of M" when filtered below total
 - Unauthorized domains render as `.dd-disabled` rows (Pending Auth badge, `cursor:not-allowed`, 40% opacity) — not clickable, not selectable
+- Keyword research generator pulls from three sources in priority order: (1) Google Keyword Planner via `KeywordPlanIdeaService.generateKeywordIdeas` (requires `GOOGLE_ADS_DEVELOPER_TOKEN` + `GOOGLE_ADS_CUSTOMER_ID` env vars + OAuth tokens in KV), (2) Google Trends unofficial API (free, no key, server-side fetch strips `)]}'\n` XSSI prefix), (3) Search Console placeholder (wired, not yet active)
+- If Google Ads credentials are missing, the endpoint returns `connect_message` and the UI shows a Connect Google Ads banner — never fakes or mocks data
+- Keyword scoring (1–100): volume (0–40) + competition inverted (0–25) + intent (0–20: emergency=20, commercial=15, local=10, info=5) + geo-relevance (0–10) + EMD bonus (0–5)
+- Google Trends data: trend_values (12-month array) used to draw inline SVG sparklines; recent vs. older 3-point comparison adds up to +3 score boost for rising trends
+- KV cache key format: `kw:{company_key}:{territory-slug}:{niche-slug}` with 7-day TTL — avoids repeat API calls for same inputs
+- `keywords` table added to D1 (migration 0007): id, domain_id, company_id, keyword, volume, cpc, competition, intent_type, match_type, score, territory, source, created_at
+- `GEO_TARGETS` maps city name slugs to Google Ads geo target constant IDs; defaults to Canada (2124) if city not found
+- `refreshGoogleToken()` checks token age against `expires_in`, auto-refreshes using `refresh_token` stored in KV, writes updated token back — keeps sessions alive without user re-auth
+- Keyword research seeds from D1 domain keywords (authorized domains for selected company) + niche+territory combos — never hardcoded seeds
+- Export to CSV: all keyword fields included, filename formatted as `keywords-{territory}-{timestamp}.csv`
+- `sendKwToAds()` and `sendKwToLP()` wire keywords directly to existing generators — keyword research feeds the full pipeline
 
 ---
 

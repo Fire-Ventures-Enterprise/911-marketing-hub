@@ -228,6 +228,22 @@
     .dd-badge-pending  { color: #f87171; background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.2); }
     .dd-empty { padding: 16px; text-align: center; color: var(--tx3); font-size: 12px; }
 
+    /* ── KEYWORD RESEARCH ── */
+    .kw-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .kw-table th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--tx3); border-bottom: 1px solid var(--bd); white-space: nowrap; }
+    .kw-table td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.03); vertical-align: middle; }
+    .kw-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .kw-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 12px; border: 1px solid; font-size: 10px; font-weight: 600; white-space: nowrap; }
+    .kw-match { display: inline-block; padding: 2px 7px; border-radius: 4px; background: var(--bg-s); border: 1px solid var(--bd); color: var(--tx2); font-size: 10px; font-weight: 700; }
+    .kw-score { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 50%; font-size: 12px; font-weight: 800; border: 2px solid; }
+    .kw-source { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--tx3); background: var(--bg-s); border: 1px solid var(--bd); margin-left: 4px; }
+    .kw-connect { display: flex; align-items: center; gap: 16px; }
+    .kw-source-pill { display: flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 8px; border: 1px solid; font-size: 12px; font-weight: 600; }
+    .kw-filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .kw-ftab { padding: 5px 12px; border-radius: 20px; border: 1px solid var(--bd2); background: var(--bg-s); color: var(--tx3); font-size: 11px; font-weight: 600; cursor: pointer; transition: all var(--t); }
+    .kw-ftab.active, .kw-ftab:hover { border-color: var(--accent); color: var(--tx); background: rgba(204,0,0,0.08); }
+    .kw-vol-bar { display: inline-block; height: 4px; border-radius: 2px; background: linear-gradient(90deg,#4ade80,#22d3ee); vertical-align: middle; margin-left: 6px; opacity: 0.6; }
+
     .role-badge {
       font-size: 10px;
       font-weight: 700;
@@ -578,6 +594,9 @@
       <button class="nav-item" data-section="seo" onclick="showSection('seo')">
         <span class="nav-icon">🔍</span><span>SEO Content</span>
       </button>
+      <button class="nav-item" data-section="keywords" onclick="showSection('keywords')">
+        <span class="nav-icon">🎯</span><span>Keywords</span>
+      </button>
       <button class="nav-item" data-section="publish" onclick="showSection('publish')">
         <span class="nav-icon">🚀</span><span>Batch Publish</span>
       </button>
@@ -749,6 +768,96 @@
           </div>
         </div>
         <div id="seo-output"></div>
+      </div>
+
+      <!-- KEYWORD RESEARCH -->
+      <div class="pane" id="pane-keywords">
+        <div class="ph"><h2>Keyword Research</h2><p>Real data from Google Keyword Planner + Trends — zero mocked results</p></div>
+
+        <!-- Research form -->
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Research Parameters</div></div>
+          <div class="fg2">
+            <div class="ff">
+              <label>Company / Niche</label>
+              <select id="kw-company"><option value="">All companies</option></select>
+            </div>
+            <div class="ff">
+              <label>Territory</label>
+              <input type="text" id="kw-territory" placeholder="e.g. Ottawa, ON">
+            </div>
+            <div class="ff">
+              <label>Service / Niche</label>
+              <input type="text" id="kw-niche" placeholder="e.g. water damage restoration">
+            </div>
+            <div class="ff">
+              <label>Geo Radius</label>
+              <select id="kw-radius">
+                <option value="city">City only</option>
+                <option value="+20km">+20 km radius</option>
+                <option value="+50km">+50 km radius</option>
+              </select>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="kw-run-btn" onclick="runKeywordResearch()">🎯 Research Keywords</button>
+            <button class="btn btn-sec" onclick="exportKeywordsCSV()">📥 Export CSV</button>
+            <button class="btn btn-sec" onclick="saveAllKeywords()">💾 Save All to D1</button>
+          </div>
+        </div>
+
+        <!-- Connect banner (shown when Planner not connected) -->
+        <div id="kw-connect-banner" style="display:none" class="card">
+          <div class="kw-connect">
+            <span style="font-size:28px">📡</span>
+            <div style="flex:1">
+              <div style="font-weight:700;color:var(--tx);margin-bottom:4px" id="kw-connect-msg">Connect Google Ads to unlock real volume data</div>
+              <div style="font-size:12px;color:var(--tx3)">Keyword structure, intent scoring, and Google Trends data are available now. CPC and monthly volume require Google Ads API credentials.</div>
+            </div>
+            <a href="/api/auth/google" class="btn btn-primary" style="white-space:nowrap;flex-shrink:0">Connect Google Ads</a>
+          </div>
+        </div>
+
+        <!-- Data source status pills -->
+        <div id="kw-sources-card" style="display:none" class="card">
+          <div class="card-hd"><div class="card-title">Data Sources</div></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;padding:4px 0" id="kw-sources-list"></div>
+        </div>
+
+        <!-- Keyword results -->
+        <div id="kw-results-card" style="display:none" class="card">
+          <div class="card-hd">
+            <div class="card-title" id="kw-result-count">0 Keywords</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <span id="kw-cached-badge" style="display:none;font-size:10px;color:#F59E0B;border:1px solid rgba(245,158,11,0.3);background:rgba(245,158,11,0.08);padding:2px 8px;border-radius:10px;font-weight:700">⚡ Cached</span>
+            </div>
+          </div>
+          <div class="kw-filter-bar" id="kw-filter-bar">
+            <button class="kw-ftab active" onclick="filterKeywords('all',this)">All</button>
+            <button class="kw-ftab" onclick="filterKeywords('emergency',this)">🚨 Emergency</button>
+            <button class="kw-ftab" onclick="filterKeywords('commercial',this)">💰 Commercial</button>
+            <button class="kw-ftab" onclick="filterKeywords('local',this)">📍 Local</button>
+            <button class="kw-ftab" onclick="filterKeywords('informational',this)">📚 Info</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="kw-table">
+              <thead>
+                <tr>
+                  <th>Keyword</th>
+                  <th>Volume / mo</th>
+                  <th>CPC (CAD)</th>
+                  <th>Comp.</th>
+                  <th>Intent</th>
+                  <th>Match</th>
+                  <th>Score</th>
+                  <th>Suggested Domain</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="kw-tbody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <!-- BATCH PUBLISH -->
