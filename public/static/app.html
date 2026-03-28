@@ -200,6 +200,34 @@
     .qf-revoke  { background: rgba(239,68,68,0.10);   color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
     .qf-request { background: rgba(96,165,250,0.10);  color: #60a5fa; border: 1px solid rgba(96,165,250,0.25); }
 
+    /* ── DOMAIN DROPDOWN ── */
+    .dd-wrap { position: relative; width: 100%; }
+    .dd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .dd-chip { padding: 4px 11px; border-radius: 20px; border: 1px solid var(--bd2); background: var(--bg-s); color: var(--tx2); font-size: 11px; font-weight: 600; cursor: pointer; transition: all var(--t); white-space: nowrap; }
+    .dd-chip:hover { border-color: var(--accent); color: var(--tx); background: rgba(204,0,0,0.08); }
+    .dd-trigger { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; background: var(--bg-in); border: 1px solid var(--bd2); border-radius: var(--r); cursor: pointer; font-size: 13px; color: var(--tx2); transition: border-color var(--t); user-select: none; min-height: 38px; }
+    .dd-trigger:hover, .dd-wrap.open .dd-trigger { border-color: var(--accent); color: var(--tx); }
+    .dd-val { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dd-arrow { color: var(--tx3); font-size: 11px; margin-left: 8px; transition: transform var(--t); flex-shrink: 0; }
+    .dd-wrap.open .dd-arrow { transform: rotate(180deg); }
+    .dd-panel { display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--bg-c); border: 1px solid var(--bd2); border-radius: var(--r); box-shadow: var(--sh); z-index: 200; overflow: hidden; }
+    .dd-wrap.open .dd-panel { display: block; }
+    .dd-search { width: 100%; padding: 9px 12px; background: var(--bg-s); border: none; border-bottom: 1px solid var(--bd); color: var(--tx); font-size: 13px; outline: none; }
+    .dd-search::placeholder { color: var(--tx3); }
+    .dd-list { max-height: 320px; overflow-y: auto; }
+    .dd-group-hd { padding: 7px 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--tx3); border-bottom: 1px solid var(--bd); background: var(--bg-s); position: sticky; top: 0; z-index: 1; }
+    .dd-item { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; transition: background var(--t); border-bottom: 1px solid rgba(255,255,255,0.03); }
+    .dd-item:hover:not(.dd-disabled) { background: rgba(96,165,250,0.06); }
+    .dd-disabled { opacity: 0.4; cursor: not-allowed; }
+    .dd-item-domain { font-size: 12px; font-weight: 600; color: var(--tx); flex: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .dd-item-kw { font-size: 11px; color: var(--tx3); flex: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .dd-item-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; border: 1px solid; flex-shrink: 0; white-space: nowrap; }
+    .dd-badge-active   { color: #4ade80; background: rgba(74,222,128,0.10);  border-color: rgba(74,222,128,0.3); }
+    .dd-badge-building { color: #F59E0B; background: rgba(245,158,11,0.10); border-color: rgba(245,158,11,0.3); }
+    .dd-badge-parked   { color: #94a3b8; background: rgba(148,163,184,0.10); border-color: rgba(148,163,184,0.3); }
+    .dd-badge-pending  { color: #f87171; background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.2); }
+    .dd-empty { padding: 16px; text-align: center; color: var(--tx3); font-size: 12px; }
+
     .role-badge {
       font-size: 10px;
       font-weight: 700;
@@ -638,9 +666,23 @@
         <div class="card">
           <div class="card-hd"><div class="card-title">Generate Landing Page HTML</div></div>
           <div class="fg2">
-            <div class="ff"><label>Domain</label><input type="text" id="lp-domain" placeholder="e.g. waterdamageottawa.ca"></div>
-            <div class="ff"><label>Keyword</label><input type="text" id="lp-keyword" placeholder="e.g. water damage ottawa"></div>
-            <div class="ff"><label>Service</label><input type="text" id="lp-service" placeholder="e.g. Water Damage Restoration"></div>
+            <div class="ff" style="grid-column:1/-1">
+              <label>Domain</label>
+              <div class="dd-wrap" id="lp-dd-wrap">
+                <input type="hidden" id="lp-domain">
+                <div class="dd-chips" id="lp-dd-chips"></div>
+                <div class="dd-trigger" onclick="toggleDomainDD('lp')">
+                  <span class="dd-val" id="lp-dd-display">Select a domain…</span>
+                  <span class="dd-arrow">▾</span>
+                </div>
+                <div class="dd-panel" id="lp-dd-panel">
+                  <input class="dd-search" id="lp-dd-search" type="text" placeholder="🔍 Search domains, keywords, services…" oninput="filterDomainDD('lp',this.value)" onclick="event.stopPropagation()">
+                  <div class="dd-list" id="lp-dd-list"></div>
+                </div>
+              </div>
+            </div>
+            <div class="ff"><label>Keyword</label><input type="text" id="lp-keyword" placeholder="Auto-filled on select"></div>
+            <div class="ff"><label>Service</label><input type="text" id="lp-service" placeholder="Auto-filled on select"></div>
             <div class="ff"><label>Company</label><select id="lp-company"><option value="">Auto-detect</option></select></div>
           </div>
           <div class="btn-row">

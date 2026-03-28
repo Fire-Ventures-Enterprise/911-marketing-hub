@@ -121,6 +121,7 @@ async function loadCompanies() {
     allCompanies = companies || [];
     _populateCompanySelects();
     _renderDashboardCompanies();
+    if (allDomains.length) buildDomainDD('lp');
   } catch(e) {
     console.warn('Could not load companies:', e.message);
   }
@@ -161,6 +162,155 @@ function _renderDashboardCompanies() {
   }).join('');
 }
 
+// ── DOMAIN DROPDOWN ───────────────────────────────────────────────────────
+
+const CO_ICONS = { Restoration: '🚨', Renovation: '🔨', Kitchen: '🍳' };
+let _ddOutsideRegistered = false;
+
+function _hesc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function buildDomainDD(prefix) {
+  if (!allDomains.length) return;
+  _renderDomainDDList(prefix, allDomains);
+  _renderDomainDDChips(prefix);
+  if (!_ddOutsideRegistered) {
+    _ddOutsideRegistered = true;
+    document.addEventListener('click', e => {
+      document.querySelectorAll('.dd-wrap.open').forEach(w => {
+        if (!w.contains(e.target)) w.classList.remove('open');
+      });
+    });
+  }
+}
+
+function toggleDomainDD(prefix) {
+  const wrap = document.getElementById(prefix + '-dd-wrap');
+  if (!wrap) return;
+  const isOpen = wrap.classList.toggle('open');
+  if (isOpen) {
+    const search = document.getElementById(prefix + '-dd-search');
+    if (search) { search.value = ''; search.focus(); }
+    _renderDomainDDList(prefix, allDomains);
+  }
+}
+
+function filterDomainDD(prefix, query) {
+  const q = query.toLowerCase().trim();
+  const filtered = !q ? allDomains : allDomains.filter(d =>
+    d.domain.toLowerCase().includes(q) ||
+    d.keyword.toLowerCase().includes(q) ||
+    d.service.toLowerCase().includes(q) ||
+    d.co.toLowerCase().includes(q)
+  );
+  _renderDomainDDList(prefix, filtered, q);
+}
+
+function _renderDomainDDChips(prefix) {
+  const el = document.getElementById(prefix + '-dd-chips');
+  if (!el) return;
+  // Top 5 active + authorized domains sorted by priority
+  const top5 = allDomains
+    .filter(d => d.status === 'Active' && (d.authorized === 1 || d.authorized === true))
+    .sort((a, b) => (a.priority || 9) - (b.priority || 9))
+    .slice(0, 5);
+  if (!top5.length) { el.innerHTML = ''; return; }
+  el.innerHTML = top5.map(d =>
+    `<button class="dd-chip"
+       data-domain="${_hesc(d.domain)}" data-keyword="${_hesc(d.keyword)}"
+       data-service="${_hesc(d.service)}" data-co="${_hesc(d.co)}"
+       onclick="selectDomainDDEl('${prefix}',this)">
+       ${d.domain}
+     </button>`
+  ).join('');
+}
+
+function _renderDomainDDList(prefix, domains, query) {
+  const el = document.getElementById(prefix + '-dd-list');
+  if (!el) return;
+  if (!domains.length) {
+    el.innerHTML = '<div class="dd-empty">No domains match "' + (query || '') + '"</div>';
+    return;
+  }
+  // Group by company key
+  const groups = {};
+  domains.forEach(d => { (groups[d.co] = groups[d.co] || []).push(d); });
+  const coOrder = allCompanies.length
+    ? allCompanies.map(c => c.key).filter(k => groups[k])
+    : Object.keys(groups);
+  // Add any keys not in allCompanies (safety fallback)
+  Object.keys(groups).forEach(k => { if (!coOrder.includes(k)) coOrder.push(k); });
+
+  let html = '';
+  coOrder.forEach(coKey => {
+    const list = groups[coKey];
+    if (!list || !list.length) return;
+    const co     = allCompanies.find(c => c.key === coKey);
+    const coName = co ? co.name : coKey;
+    const icon   = CO_ICONS[coKey] || '🏢';
+    const totalForCo = allDomains.filter(d => d.co === coKey).length;
+    const countLabel  = list.length < totalForCo ? `${list.length} of ${totalForCo}` : list.length;
+    html += `<div class="dd-group-hd">${icon} ${_hesc(coName)} (${countLabel})</div>`;
+    list.forEach(d => {
+      const authOk   = d.authorized === 1 || d.authorized === true;
+      const badgeCls = d.status === 'Active' ? 'dd-badge-active' : d.status === 'Building' ? 'dd-badge-building' : 'dd-badge-parked';
+      if (authOk) {
+        html += `<div class="dd-item"
+          data-domain="${_hesc(d.domain)}" data-keyword="${_hesc(d.keyword)}"
+          data-service="${_hesc(d.service)}" data-co="${_hesc(d.co)}"
+          onclick="selectDomainDDEl('${prefix}',this)">
+          <span class="dd-item-domain">${_hesc(d.domain)}</span>
+          <span class="dd-item-kw">${_hesc(d.keyword)}</span>
+          <span class="dd-item-badge ${badgeCls}">${d.status}</span>
+        </div>`;
+      } else {
+        html += `<div class="dd-item dd-disabled">
+          <span class="dd-item-domain">${_hesc(d.domain)}</span>
+          <span class="dd-item-kw">${_hesc(d.keyword)}</span>
+          <span class="dd-item-badge dd-badge-pending">Pending Auth</span>
+        </div>`;
+      }
+    });
+  });
+  el.innerHTML = html;
+}
+
+function selectDomainDDEl(prefix, el) {
+  selectDomainDD(prefix, {
+    domain:  el.dataset.domain,
+    keyword: el.dataset.keyword,
+    service: el.dataset.service,
+    co:      el.dataset.co
+  });
+}
+
+function selectDomainDD(prefix, d) {
+  // Fill the hidden input + auto-fill related fields
+  const hiddenInput = document.getElementById(prefix + '-domain');
+  if (hiddenInput) hiddenInput.value = d.domain;
+  const display = document.getElementById(prefix + '-dd-display');
+  if (display) display.textContent = d.domain;
+  const kwEl = document.getElementById(prefix + '-keyword');
+  if (kwEl) kwEl.value = d.keyword;
+  const svcEl = document.getElementById(prefix + '-service');
+  if (svcEl) svcEl.value = d.service;
+  const coEl = document.getElementById(prefix + '-company');
+  if (coEl) coEl.value = d.co;
+  // Close panel
+  const wrap = document.getElementById(prefix + '-dd-wrap');
+  if (wrap) wrap.classList.remove('open');
+  toast('✓ ' + d.domain);
+}
+
+function setDomainDDDisplay(prefix, domainStr) {
+  // Called externally (e.g. fillLP from domain army) to keep DD display in sync
+  const hidden = document.getElementById(prefix + '-domain');
+  if (hidden) hidden.value = domainStr || '';
+  const display = document.getElementById(prefix + '-dd-display');
+  if (display) display.textContent = domainStr || 'Select a domain…';
+}
+
 // ── DOMAINS ───────────────────────────────────────────────────────────────
 
 async function loadDomains() {
@@ -169,6 +319,7 @@ async function loadDomains() {
     const data = await r.json();
     allDomains = data.domains || [];
     renderDomains(allDomains);
+    buildDomainDD('lp');
     _updateDashStats();
     if (allCompanies.length) _renderDashboardCompanies();
   } catch(e) {
@@ -284,7 +435,13 @@ function filterDomains(filter, el) {
 }
 
 function fillFromDomain(domain, keyword, service, co) {
-  ['lp','ads','seo'].forEach(p => {
+  // LP uses the custom dropdown — keep display in sync
+  setDomainDDDisplay('lp', domain);
+  document.getElementById('lp-keyword').value = keyword;
+  document.getElementById('lp-service').value = service;
+  document.getElementById('lp-company').value = co;
+  // Ads + SEO still use plain text inputs
+  ['ads','seo'].forEach(p => {
     document.getElementById(p+'-domain').value  = domain;
     document.getElementById(p+'-keyword').value = keyword;
     document.getElementById(p+'-service').value = service;
@@ -295,7 +452,7 @@ function fillFromDomain(domain, keyword, service, co) {
 }
 
 function fillLP(domain, keyword, service, co) {
-  document.getElementById('lp-domain').value  = domain;
+  setDomainDDDisplay('lp', domain);
   document.getElementById('lp-keyword').value = keyword;
   document.getElementById('lp-service').value = service;
   document.getElementById('lp-company').value = co;

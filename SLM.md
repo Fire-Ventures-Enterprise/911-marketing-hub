@@ -114,6 +114,12 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Domain auth UI role matrix: `super_admin` → Authorize/Revoke on every domain; `company_admin` → Request Auth button on unauthorized domains only; `manager`/`staff` → read-only (no action buttons); auth badge shows ISO date when authorized
 - `POST /api/domains/:id/request-auth` logs request to KV (key: `auth_request:{domain_id}:{user_id}`, TTL 30 days) — super admin reviews and uses `/authorize` to approve
 - `.qf-request` button style added (blue, matches company_admin role color) for Request Auth button
+- LP Generator domain field is a custom grouped dropdown (not a plain `<input>`) — use `id="lp-domain"` hidden input for the value, `setDomainDDDisplay('lp', domain)` to sync the visible label from external callers (fillLP, fillFromDomain); never read from a plain text input on the LP pane
+- `buildDomainDD(prefix)` must be called after both `allDomains` and `allCompanies` are loaded — call it from both `loadDomains()` and `loadCompanies()` so group headers show full company names
+- `_ddOutsideRegistered` flag prevents duplicate `document.click` listeners across multiple `buildDomainDD` calls
+- Dropdown groups domains by `d.co` (company key); company display name and icon come from `allCompanies` with a key-based fallback — never hardcoded
+- `filterDomainDD` searches across domain, keyword, service, and co fields; the group header shows "N of M" when filtered below total
+- Unauthorized domains render as `.dd-disabled` rows (Pending Auth badge, `cursor:not-allowed`, 40% opacity) — not clickable, not selectable
 
 ---
 
