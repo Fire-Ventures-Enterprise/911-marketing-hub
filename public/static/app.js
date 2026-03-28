@@ -708,16 +708,17 @@ async function generateLP() {
   const service = document.getElementById('lp-service').value;
   const domain  = document.getElementById('lp-domain').value;
   const company = document.getElementById('lp-company').value;
+  const mode    = document.getElementById('lp-mode')?.value || 'seo';
   if (!keyword || !service || !domain) { toast('Fill keyword, service & domain', 'error'); return; }
   document.getElementById('lp-output').textContent = 'Generating…';
   const r = await fetch('/api/generate/landing-page', {
     method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({keyword, service, domain, company})
+    body: JSON.stringify({keyword, service, domain, company, mode})
   });
   const d = await r.json();
   lastLpHtml = d.html;
   document.getElementById('lp-output').textContent = d.html;
-  toast('Generated for ' + d.brand);
+  toast(`Generated [${mode.toUpperCase()}] for ` + d.brand);
 }
 
 function copyLP() {

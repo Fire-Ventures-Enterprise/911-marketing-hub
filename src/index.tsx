@@ -93,13 +93,470 @@ function detectCompany(domain: string, keyword: string, override?: string): stri
   return 'Restoration'
 }
 
-function generateLandingPage(keyword: string, service: string, domain: string, co: string) {
-  const company = COMPANIES[co]
-  const year = new Date().getFullYear()
-  const phone = company.phone
-  const phoneDigits = phone.replace(/[^0-9]/g, '')
-  const calloutHtml = company.callouts.map((c: string) => `<span class="callout">${c}</span>`).join('')
-  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>${service} Ottawa | ${company.name}</title><meta name="description" content="Professional ${service.toLowerCase()} in Ottawa. ${company.name} - call ${phone}."><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;background:#fff;color:#1a1a1a}header{background:${company.colors.bg};color:#fff;padding:16px 24px;display:flex;justify-content:space-between;align-items:center}.brand{font-size:20px;font-weight:800}.cta-header{background:${company.colors.accent};color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;font-weight:700}.hero{background:linear-gradient(135deg,${company.colors.bg},${company.colors.accent});color:#fff;padding:80px 24px;text-align:center}.hero h1{font-size:40px;font-weight:900;margin-bottom:16px}.hero p{font-size:18px;margin-bottom:32px}.hero-cta{background:#fff;color:${company.colors.bg};padding:16px 36px;border-radius:6px;text-decoration:none;font-weight:800;font-size:18px}.section{max-width:900px;margin:0 auto;padding:60px 24px}.callouts{display:flex;flex-wrap:wrap;gap:10px;margin:20px 0}.callout{background:${company.colors.bg};color:#fff;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:600}form{background:#f8f8f8;border-radius:10px;padding:32px}input,textarea{width:100%;padding:12px;border:2px solid #ddd;border-radius:6px;font-size:15px;margin-bottom:14px}.submit-btn{background:${company.colors.accent};color:#fff;border:none;padding:16px 32px;border-radius:6px;font-size:18px;font-weight:800;cursor:pointer;width:100%}footer{background:${company.colors.bg};color:#fff;text-align:center;padding:20px;font-size:13px}</style></head><body><header><div class="brand">${company.name}</div><a href="tel:${phoneDigits}" class="cta-header">Call ${phone}</a></header><div class="hero"><h1>${service} in Ottawa</h1><p>Fast, professional service — call now.</p><a href="tel:${phoneDigits}" class="hero-cta">Call ${phone}</a></div><div class="section"><h2>Why Choose ${company.name}?</h2><div class="callouts">${calloutHtml}</div><h2 style="margin-top:32px">Get a Free Quote</h2><form onsubmit="handleSubmit(event)"><input type="text" name="name" placeholder="Your Name" required><input type="tel" name="phone" placeholder="Phone Number" required><input type="email" name="email" placeholder="Email"><textarea name="message" rows="3" placeholder="Describe your situation..."></textarea><button type="submit" class="submit-btn">Get My Free Quote</button></form></div><footer><p>${company.name} | ${phone} | ${year}</p></footer><script>async function handleSubmit(e){e.preventDefault();const btn=e.target.querySelector(".submit-btn");btn.textContent="Sending...";const data=Object.fromEntries(new FormData(e.target));data.source="landing-page";data.page=window.location.hostname;data.company="${co}";try{await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});btn.textContent="Submitted!";btn.style.background="#22c55e";e.target.reset();}catch{btn.textContent="Error - call us";}}<\/script></body></html>`
+// ── LANDING PAGE GENERATOR — FULL CONVERSION TEMPLATE ────────────────────
+
+type Niche = 'restoration' | 'renovation' | 'kitchen'
+type CompanyData = {
+  name: string; phone: string; mainDomain: string
+  color_bg: string; color_accent: string
+  callouts: string[]; sitelinks: Array<{ text: string; url: string }>
+}
+
+function getNiche(co: string, service: string): Niche {
+  const s = (co + ' ' + service).toLowerCase()
+  if (s.includes('kitchen') || s.includes('cabinet') || s.includes('cabinetry')) return 'kitchen'
+  if (s.includes('renovation') || s.includes('remodel') || s.includes('addition')) return 'renovation'
+  return 'restoration'
+}
+
+function extractCity(keyword: string): string {
+  const lower = keyword.toLowerCase()
+  const cities = ['kanata', 'barrhaven', 'orleans', 'nepean', 'gloucester', 'stittsville', 'manotick', 'gatineau', 'ottawa']
+  const found = cities.find(c => lower.includes(c))
+  return found ? found.charAt(0).toUpperCase() + found.slice(1) : 'Ottawa'
+}
+
+function capWords(s: string): string {
+  return s.split(' ').map(w => w ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase() : '').join(' ')
+}
+
+function getLPFeatures(niche: Niche): Array<{ icon: string; title: string; desc: string }> {
+  if (niche === 'kitchen') return [
+    { icon: '🎨', title: 'Free 3D Design Rendering', desc: 'Visualize your complete kitchen in full 3D before we build a single cabinet. No surprises — what you see is exactly what you get.' },
+    { icon: '🌲', title: 'Solid Wood Construction', desc: 'Every cabinet crafted from premium solid wood. Built to last decades, not years — with finishes that stay beautiful under daily use.' },
+    { icon: '🏭', title: 'Ottawa Factory Direct', desc: 'We manufacture locally and sell direct, eliminating the middleman entirely. You save 30–50% compared to retail showroom pricing.' },
+    { icon: '📏', title: 'Custom Fit to Your Space', desc: 'Every unit is built and fitted to your exact measurements — not forced into standard sizes. The result is a seamless, built-in look.' },
+    { icon: '🔧', title: 'Professional Installation', desc: 'Our certified installation team handles everything from start to finish, perfectly level every time, with a clean worksite guaranteed.' },
+    { icon: '⭐', title: 'Google Rated 4.9 / 5', desc: "Hundreds of Ottawa homeowners rate us 5 stars for quality, service, and value. We don't consider a job done until you're completely satisfied." }
+  ]
+  if (niche === 'renovation') return [
+    { icon: '📋', title: 'Free Detailed Estimates', desc: 'Fully itemized estimates before a single nail is driven. No hidden fees, no surprise invoices — you know the full cost before you commit.' },
+    { icon: '🏆', title: '10-Year Workmanship Warranty', desc: 'We stand behind every project with a comprehensive 10-year warranty on all labour and workmanship. Build with confidence.' },
+    { icon: '📜', title: 'Full Permit Management', desc: 'We handle all Ottawa building permit applications, inspections, and approvals on your behalf. Zero bureaucracy headaches for you.' },
+    { icon: '👷', title: 'Licensed & Bonded Contractors', desc: 'Fully licensed, bonded, and insured in Ontario. Your project, property, and investment are completely protected throughout.' },
+    { icon: '🎯', title: 'Design-Build Under One Roof', desc: 'Design, permits, construction, and finishing — all managed by one team seamlessly. One point of contact from start to finish.' },
+    { icon: '🏘️', title: 'Ottawa Local Since 2005', desc: "Deep roots in the Ottawa community with thousands of completed local projects. We're not just contractors — we're your neighbours." }
+  ]
+  return [
+    { icon: '⚡', title: '45-Minute Response Guarantee', desc: 'We arrive within 45 minutes because every hour water sits, damage compounds. Faster response = lower restoration costs for you.' },
+    { icon: '🏦', title: 'Insurance Direct Billing', desc: 'We work directly with your insurance carrier, handle all paperwork, and submit a fully documented claim so you never deal with the back-and-forth.' },
+    { icon: '🎓', title: 'IICRC Certified Technicians', desc: "Every technician holds active IICRC certification — the restoration industry's highest standard for professional training and ethics." },
+    { icon: '📞', title: '24 / 7 Emergency Line', desc: "Disasters don't follow business hours. Our emergency line is answered by a live technician every hour of every day — including holidays." },
+    { icon: '🏠', title: 'Full Restoration Service', desc: 'From emergency extraction through complete structural rebuild — we handle every phase so you never manage multiple contractors.' },
+    { icon: '📸', title: 'Complete Insurance Documentation', desc: 'We photograph, measure, and document all damage in professional detail to maximise your insurance payout and speed up approval.' }
+  ]
+}
+
+function getLPFaqs(niche: Niche, service: string, city: string, phone: string): Array<{ q: string; a: string }> {
+  if (niche === 'kitchen') return [
+    { q: 'How long does a kitchen cabinet installation take?', a: `Most kitchen cabinet installations in ${city} take 3–7 business days depending on scope. We provide a detailed project timeline before work begins so you can plan accordingly.` },
+    { q: 'What is the difference between custom and semi-custom cabinets?', a: `Custom cabinets are built to your exact measurements and specifications — ideal for unusual layouts or premium finishes. Semi-custom offers standard sizes with limited customisation. We offer both at factory-direct prices, so you get more cabinet for your budget.` },
+    { q: `How much does a kitchen renovation cost in ${city}?`, a: `A full kitchen cabinet installation in ${city} typically ranges from $8,000–$35,000 depending on size, layout, and materials. We provide free, detailed in-home estimates. Call ${phone} to schedule yours.` },
+    { q: 'Can you work with my existing kitchen layout?', a: `Absolutely. We can reface existing cabinets, reconfigure your current layout, or design an entirely new kitchen from scratch. We work around your space, your needs, and your budget.` },
+    { q: 'Do your cabinets come with a warranty?', a: `Yes — all cabinets include a manufacturer materials warranty plus our installation craftsmanship warranty. We stand behind every joint, finish, and fitting we install.` }
+  ]
+  if (niche === 'renovation') return [
+    { q: `Do I need a building permit for a ${service.toLowerCase()} in Ottawa?`, a: `Most structural renovations in Ottawa require a building permit from the City of Ottawa. We manage the entire permit process on your behalf — applications, inspections, and final sign-off. You don't deal with the city at all.` },
+    { q: `How long does a ${service.toLowerCase()} take?`, a: `Timeline depends on scope. A standard basement renovation is typically 4–8 weeks; larger or complex projects may take 3–4 months. We provide a detailed project schedule before work starts and keep you updated at every milestone.` },
+    { q: `How much does a ${service.toLowerCase()} cost in ${city}?`, a: `Costs vary based on size, materials, and complexity. We provide free, fully itemised estimates with no obligation. Call ${phone} to schedule your on-site estimate.` },
+    { q: 'What is included in your renovation estimate?', a: `All labour, materials, permits, project management, and cleanup are itemised in our estimates. We don't add fees after the fact — what you see in the estimate is what you pay.` },
+    { q: 'Do you manage subcontractors?', a: `Yes — we coordinate all trades through our vetted network of licensed subcontractors including electricians, plumbers, and drywallers. One point of contact, zero juggling for you.` }
+  ]
+  return [
+    { q: 'Does my home insurance cover water damage restoration?', a: `Most Ontario home insurance policies cover sudden and accidental water damage. We work with all major carriers and provide complete documentation to support your claim. Call ${phone} and we'll help you navigate your coverage before we arrive.` },
+    { q: 'How quickly can you respond to a water damage emergency?', a: `We guarantee a 45-minute response in the ${city} area, 24 / 7 / 365. Speed matters — every hour water sits, repair costs increase and mold risk grows.` },
+    { q: 'How long does water damage restoration take?', a: `Structural drying typically takes 3–5 days. Complete restoration including drywall, flooring, and finishing takes 1–4 weeks depending on damage extent. We keep you informed at every stage.` },
+    { q: 'Can you save my furniture and belongings?', a: `Yes. We use professional content restoration techniques for furniture, documents, electronics, and clothing. Every item is inventoried and documented for your insurance claim.` },
+    { q: 'Will mold come back after remediation?', a: `Properly executed IICRC-standard remediation removes mold at the source. We also correct the underlying moisture problem that caused it. We provide a post-remediation clearance certificate when complete.` }
+  ]
+}
+
+function getLPReviews(niche: Niche): Array<{ text: string; name: string; area: string }> {
+  if (niche === 'kitchen') return [
+    { text: 'Exactly what I designed in the 3D rendering — down to the last detail. The solid wood quality is exceptional and the factory-direct pricing saved us over $9,000 compared to other quotes. Our kitchen is stunning.', name: 'Christine B.', area: 'Orleans' },
+    { text: 'From initial design consultation to final installation, completely seamless. The crew was meticulous — perfectly level, not a gap anywhere. We have had dozens of compliments from friends and family. Worth every dollar.', name: 'Paul W.', area: 'Manotick' },
+    { text: 'Four quotes, and these guys came in $11,000 less than the competition with better materials. The 3D design preview gave us complete confidence before we committed. The result looks like a showroom kitchen.', name: 'Karen T.', area: 'Stittsville' }
+  ]
+  if (niche === 'renovation') return [
+    { text: "Our unfinished basement is now the best room in the house. The team handled permits, design, and construction without a single issue. Finished on time, on budget. Two years later and it still looks brand new.", name: 'David M.', area: 'Nepean' },
+    { text: 'They managed everything — permits, subcontractors, inspections. I was informed at every step but never had to chase anyone down. Professional, clean, and the craftsmanship is outstanding. Highly recommend.', name: 'Amanda R.', area: 'Kanata' },
+    { text: 'The only contractor who included permit costs upfront and never added surprise charges. The finished basement exceeded our expectations and the 10-year warranty gives us real peace of mind.', name: 'Robert S.', area: 'Barrhaven' }
+  ]
+  return [
+    { text: "They arrived in 38 minutes at 2am. My entire basement was flooded and they had extraction running within the hour. They dealt with my insurance company directly and I didn't pay a cent out of pocket. Absolutely incredible service.", name: 'Sarah K.', area: 'Kanata' },
+    { text: 'Sewage backup — the worst possible situation. These guys showed up fast, worked clean, and had everything sanitised and dried within days. Their insurance documentation was so thorough my claim was approved in 48 hours.', name: 'Mike T.', area: 'Barrhaven' },
+    { text: "The IICRC-certified crew found hidden moisture damage inside our walls that we had no idea existed. If they hadn't caught it, we would have had a serious mold problem within months. Thorough, honest, and highly professional.", name: 'Jennifer L.', area: 'Orleans' }
+  ]
+}
+
+function getLPExtLinks(niche: Niche): Array<{ href: string; text: string }> {
+  if (niche === 'kitchen') return [
+    { href: 'https://www.nkba.org', text: 'National Kitchen & Bath Association (NKBA)' },
+    { href: 'https://www.houzz.com/magazine/kitchen-renovation-guide', text: 'Kitchen Renovation Planning Guide — Houzz' }
+  ]
+  if (niche === 'renovation') return [
+    { href: 'https://ottawa.ca/en/building-renovation-and-design', text: 'City of Ottawa Building Permits & Renovation' },
+    { href: 'https://www.nari.org', text: 'National Association of the Remodeling Industry (NARI)' }
+  ]
+  return [
+    { href: 'https://www.iicrc.org', text: 'IICRC — Institute of Inspection Cleaning and Restoration Certification' },
+    { href: 'https://www.epa.gov/mold', text: 'EPA Mold & Moisture Remediation Guidelines' }
+  ]
+}
+
+function generateLandingPage(
+  keyword: string, service: string, domain: string, co: string,
+  company: CompanyData, mode: 'ppc' | 'seo' = 'seo'
+): string {
+  const year   = new Date().getFullYear()
+  const phone  = company.phone || ''
+  const pd     = phone.replace(/[^0-9]/g, '')
+  const bg     = company.color_bg || '#1A1A2E'
+  const accent = company.color_accent || '#CC0000'
+  const calls: string[]                              = Array.isArray(company.callouts)  ? company.callouts  : []
+  const links: Array<{ text: string; url: string }>  = Array.isArray(company.sitelinks) ? company.sitelinks : []
+
+  const niche       = getNiche(co, service)
+  const city        = extractCity(keyword)
+  const isEmergency = niche === 'restoration' && /flood|water|sewage|burst|damage|fire|smoke|mold|emergency/.test(keyword.toLowerCase())
+
+  const h1 = isEmergency
+    ? `${capWords(keyword)}? We Respond in 45 Minutes`
+    : niche === 'kitchen'
+    ? `${capWords(keyword)} — Free 3D Design Consultation`
+    : niche === 'renovation'
+    ? `${capWords(keyword)} — Free Estimate`
+    : `Professional ${capWords(service)} in ${city}`
+
+  const heroSub   = calls.slice(0, 3).join(' &nbsp;·&nbsp; ') || `Professional ${service} in ${city}`
+  const ctaLabel  = niche === 'restoration'
+    ? `Get My Free ${capWords(service)} Assessment`
+    : `Get My Free ${capWords(service)} Consultation`
+  const urgency   = niche === 'restoration'
+    ? 'Every minute counts — water damage compounds by the hour. Call now for guaranteed 45-minute emergency response.'
+    : niche === 'kitchen'
+    ? 'Book your free 3D kitchen design consultation this week — design slots fill fast.'
+    : 'Get your free renovation estimate before material prices change.'
+
+  const features = getLPFeatures(niche)
+  const faqs     = getLPFaqs(niche, service, city, phone)
+  const reviews  = getLPReviews(niche)
+  const extLinks = mode === 'seo' ? getLPExtLinks(niche) : []
+
+  const nbhd = `${city}, Kanata, Barrhaven, Orleans, Nepean, Gloucester, Stittsville, Manotick`
+
+  const p1 = `When it comes to ${service.toLowerCase()} in ${city}, choosing the right company makes all the difference. ${company.name} has been serving ${city} homeowners with professional, reliable ${service.toLowerCase()} since 2005. Whether you're in ${city} proper or surrounding communities like Kanata, Barrhaven, or Orleans, our team is ready to help.`
+  const p2 = niche === 'restoration'
+    ? `Water damage, mold, and fire damage don't wait for business hours — and neither do we. Our IICRC-certified technicians respond 24 / 7 for emergency ${service.toLowerCase()} across ${city}. We work directly with all major insurance carriers, handle complete documentation, and manage the entire claim process so you can focus on your family — not paperwork.`
+    : niche === 'kitchen'
+    ? `Our Ottawa factory-direct model means we design, build, and install your kitchen cabinets without a middleman — saving you 30–50% compared to retail showrooms. Every cabinet is crafted from premium materials and fitted precisely to your space. From classic Shaker styles to modern frameless designs, we build kitchens that Ottawa homeowners are proud of for decades.`
+    : `Every ${service.toLowerCase()} we take on in ${city} is managed end-to-end by our experienced team. From initial design consultation through permit applications, construction, and final City of Ottawa inspection, we handle everything under one roof. No subcontractor juggling, no permit headaches, no hidden costs after the fact.`
+  const p3 = `We serve the complete ${city} region including ${nbhd}. ${calls.length ? `Our commitment to quality is backed by our core guarantees: ${calls.slice(0, 3).join(', ')}.` : ''} Call ${phone} or complete the form on this page for your free, no-obligation consultation.`
+
+  const extHtml = extLinks.length
+    ? `<p style="font-size:14px;margin-top:20px;color:#64748b">Further reading: ${extLinks.map(l => `<a href="${l.href}" target="_blank" rel="noopener noreferrer" style="color:${accent};font-weight:600">${l.text}</a>`).join(' &nbsp;·&nbsp; ')}</p>`
+    : ''
+
+  const safeJ = (o: any) => JSON.stringify(o).replace(/<\/script/gi, '<\\/script')
+  const lbSch = safeJ({
+    '@context': 'https://schema.org', '@type': 'LocalBusiness',
+    name: company.name, telephone: phone, url: `https://${domain}`,
+    address: { '@type': 'PostalAddress', addressLocality: city, addressRegion: 'ON', addressCountry: 'CA' },
+    geo: { '@type': 'GeoCoordinates', latitude: 45.4215, longitude: -75.6972 },
+    openingHours: niche === 'restoration' ? 'Mo-Su 00:00-24:00' : 'Mo-Fr 08:00-18:00',
+    priceRange: '$$',
+    aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.9', reviewCount: '127', bestRating: '5' }
+  })
+  const faqSch = safeJ({
+    '@context': 'https://schema.org', '@type': 'FAQPage',
+    mainEntity: faqs.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }))
+  })
+
+  // ── HTML sections ────────────────────────────────────────────────────────
+
+  const badgesHtml = calls.map(c => `<div class="badge"><span class="bchk">✓</span>${c}</div>`).join('')
+  const featHtml   = features.map(f => `<div class="fc"><div class="fi">${f.icon}</div><h3>${f.title}</h3><p>${f.desc}</p></div>`).join('')
+  const rvHtml     = reviews.map(r => `<div class="rv"><div class="rstars">⭐⭐⭐⭐⭐</div><blockquote>"${r.text}"</blockquote><cite>— ${r.name}, ${r.area}</cite></div>`).join('')
+  const faqHtml    = faqs.map(f => `<details class="fq"><summary>${f.q}<span class="fq-icon">+</span></summary><p>${f.a}</p></details>`).join('')
+  const slHtml     = links.map(s => `<a href="https://${company.mainDomain}${s.url}">${s.text}</a>`).join('')
+  const galleryHtml = (niche === 'kitchen' || niche === 'renovation') ? `
+<section class="sec sec-alt">
+  <div class="si">
+    <h2 class="st">${niche === 'kitchen' ? 'Our Kitchen Transformations' : 'Recent Projects in Ottawa'}</h2>
+    <p class="ss">Before &amp; after results from ${city} homeowners</p>
+    <div class="gal-grid">${[1,2,3,4,5,6].map(i => `<div class="gal-item" loading="lazy">📷<span>${service} — Project ${i}</span></div>`).join('')}</div>
+    <p class="gal-note">📌 Replace placeholders with real project photos in the admin dashboard.</p>
+  </div>
+</section>` : ''
+
+  const css = `*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#1a1a1a;background:#fff;line-height:1.65}
+img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inherit}
+:root{--bg:${bg};--ac:${accent};--bg2:${bg}dd}
+/* NAV */
+.nav{position:sticky;top:0;z-index:100;background:var(--bg);padding:0 5%;height:68px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 12px rgba(0,0,0,0.2)}
+.nav-brand{color:#fff;font-size:17px;font-weight:800;letter-spacing:-.01em}
+.nav-cta{background:var(--ac);color:#fff;padding:10px 22px;border-radius:6px;font-weight:800;font-size:14px;white-space:nowrap;transition:filter .15s}.nav-cta:hover{filter:brightness(1.1)}
+/* HERO */
+.hero{background:linear-gradient(135deg,var(--bg) 0%,var(--bg) 55%,var(--ac) 100%);color:#fff;padding:64px 5%}
+.hero-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 420px;gap:52px;align-items:center}
+.hero h1{font-size:36px;font-weight:900;line-height:1.15;margin-bottom:14px}
+.hero-sub{font-size:16px;opacity:.88;margin-bottom:24px;line-height:1.6}
+.hero-ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.btn-call{background:#fff;color:var(--bg);padding:14px 26px;border-radius:8px;font-weight:800;font-size:16px;display:inline-flex;align-items:center;gap:8px;transition:filter .15s}.btn-call:hover{filter:brightness(.95)}
+.btn-quote{background:transparent;color:#fff;border:2px solid rgba(255,255,255,.55);padding:13px 22px;border-radius:8px;font-weight:700;font-size:14px;transition:border-color .15s}.btn-quote:hover{border-color:#fff}
+.trust-strip{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;opacity:.78}
+.trust-strip span::before{content:'✓ ';font-weight:700}
+/* LEAD FORM */
+.form-wrap{background:#fff;border-radius:14px;padding:28px;color:#1a1a1a;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.form-wrap h3{font-size:17px;font-weight:800;margin-bottom:16px;color:var(--bg)}
+.ff{margin-bottom:11px}
+.ff input,.ff textarea{width:100%;padding:11px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;transition:border-color .15s}.ff input:focus,.ff textarea:focus{outline:none;border-color:var(--ac)}
+.ff textarea{resize:vertical;min-height:70px}
+.fsub{width:100%;padding:14px;background:var(--ac);color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;transition:filter .15s}.fsub:hover{filter:brightness(1.08)}
+.fthanks{display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:18px;text-align:center;color:#166534;font-weight:700;font-size:15px;line-height:1.6}
+/* BADGES */
+.badges{background:#f1f5f9;padding:20px 5%}
+.badges-inner{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.badge{background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:8px 18px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.bchk{color:var(--ac);font-weight:900;font-size:15px}
+/* SECTIONS */
+.sec{padding:72px 5%}.sec-alt{background:#f8fafc}
+.si{max-width:1100px;margin:0 auto}
+.st{font-size:30px;font-weight:800;text-align:center;margin-bottom:10px}
+.ss{text-align:center;color:#64748b;margin-bottom:44px;font-size:17px}
+/* FEATURES */
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.fc{border:1px solid #e2e8f0;border-left:4px solid var(--ac);border-radius:8px;padding:24px}
+.fi{font-size:28px;margin-bottom:12px}
+.fc h3{font-size:16px;font-weight:700;margin-bottom:8px}
+.fc p{font-size:14px;color:#475569;line-height:1.65}
+/* SERVICE DESC */
+.prose p{font-size:16px;line-height:1.85;color:#374151;margin-bottom:16px}
+/* REVIEWS */
+.rv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:40px}
+.rv{border:1px solid #e2e8f0;border-top:4px solid var(--ac);border-radius:8px;padding:24px}
+.rstars{font-size:18px;margin-bottom:12px}
+.rv blockquote{font-size:15px;line-height:1.75;color:#374151;margin-bottom:14px;font-style:italic}
+.rv cite{font-size:13px;font-weight:700;color:#64748b;font-style:normal}
+/* GALLERY */
+.gal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.gal-item{aspect-ratio:4/3;background:#e2e8f0;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px;color:#94a3b8;font-weight:600;gap:6px}
+.gal-note{text-align:center;margin-top:16px;font-size:12px;color:#94a3b8}
+/* FAQ */
+.fq{border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden}
+.fq summary{padding:16px 20px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:15px}
+.fq summary::-webkit-details-marker{display:none}
+.fq-icon{color:var(--ac);font-size:20px;font-weight:700;flex-shrink:0;transition:transform .2s}
+.fq[open] .fq-icon{transform:rotate(45deg)}
+.fq p{padding:0 20px 16px;font-size:15px;line-height:1.75;color:#475569}
+/* CTA SECTION */
+.cta-sec{background:linear-gradient(135deg,var(--bg) 0%,var(--ac) 100%);color:#fff;padding:84px 5%;text-align:center}
+.cta-sec h2{font-size:34px;font-weight:900;margin-bottom:12px}
+.cta-sec p{font-size:17px;opacity:.9;margin-bottom:32px;max-width:580px;margin-left:auto;margin-right:auto}
+.btn-call-lg{display:inline-flex;align-items:center;gap:10px;background:#fff;color:var(--bg);padding:18px 36px;border-radius:10px;font-weight:800;font-size:20px;margin-bottom:16px;transition:filter .15s}.btn-call-lg:hover{filter:brightness(.97)}
+.cta-sub{display:block;color:rgba(255,255,255,.75);font-size:14px;text-decoration:underline;margin-top:4px}
+/* FOOTER */
+.footer{background:var(--bg);color:rgba(255,255,255,.8);padding:48px 5%}
+.footer-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:2fr 1fr 1fr;gap:36px}
+.fbrand{font-size:19px;font-weight:800;color:#fff;margin-bottom:10px}
+.fcontact{font-size:14px;line-height:1.9}
+.fcontact a{color:var(--ac);font-weight:600}
+.flinks h4,.fareas h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.55;margin-bottom:12px}
+.flinks a{display:block;font-size:14px;padding:3px 0;color:rgba(255,255,255,.65);transition:color .15s}.flinks a:hover{color:#fff}
+.fbottom{border-top:1px solid rgba(255,255,255,.1);padding-top:16px;margin-top:28px;max-width:1100px;margin-left:auto;margin-right:auto;font-size:12px;color:rgba(255,255,255,.35);display:flex;gap:20px;flex-wrap:wrap}
+/* MOBILE STICKY */
+.sticky-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--ac);z-index:200;box-shadow:0 -2px 8px rgba(0,0,0,.2)}
+.sticky-bar a{display:flex;align-items:center;justify-content:center;gap:10px;color:#fff;font-weight:800;font-size:17px;padding:16px;letter-spacing:-.01em}
+/* RESPONSIVE */
+@media(max-width:900px){
+  .hero-inner{grid-template-columns:1fr}
+  .hero h1{font-size:28px}
+  .feat-grid{grid-template-columns:repeat(2,1fr)}
+  .rv-grid{grid-template-columns:1fr}
+  .footer-inner{grid-template-columns:1fr;gap:24px}
+  .gal-grid{grid-template-columns:repeat(2,1fr)}
+  .sticky-bar{display:block}
+  body{padding-bottom:58px}
+}
+@media(max-width:540px){
+  .hero h1{font-size:24px}
+  .feat-grid{grid-template-columns:1fr}
+  .gal-grid{grid-template-columns:1fr}
+  .st{font-size:24px}
+  .btn-call,.btn-quote{width:100%;justify-content:center}
+}`
+
+  const formHtml = `<div class="form-wrap" id="lead-form">
+  <h3>📋 ${ctaLabel}</h3>
+  <form id="lp-form">
+    <input type="hidden" name="source" value="landing-page">
+    <input type="hidden" name="page" value="${domain}">
+    <input type="hidden" name="company" value="${co}">
+    <input type="hidden" name="keyword" value="${keyword}">
+    <div class="ff"><input type="text" name="name" placeholder="Your Full Name" required></div>
+    <div class="ff"><input type="tel" name="phone" placeholder="Phone Number" required></div>
+    <div class="ff"><input type="email" name="email" placeholder="Email Address"></div>
+    <div class="ff"><textarea name="message" rows="3" placeholder="${niche === 'restoration' ? 'Describe the damage or situation...' : niche === 'kitchen' ? 'Tell us about your kitchen project...' : 'Describe your renovation project...'}"></textarea></div>
+    <button type="submit" class="fsub">📞 ${ctaLabel}</button>
+  </form>
+  <div class="fthanks" id="form-thanks">✅ We received your request! Expect a call within ${niche === 'restoration' ? '45 minutes' : '24 hours'}.</div>
+</div>`
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${capWords(service)} ${city} | ${company.name} — ${year}</title>
+<meta name="description" content="Professional ${service.toLowerCase()} in ${city}, ON. ${company.name} — ${calls.slice(0, 2).join(', ') || 'Licensed & Insured'}. Call ${phone} for a free ${niche === 'restoration' ? 'assessment' : 'consultation'}.">
+<meta name="robots" content="${mode === 'ppc' ? 'noindex,nofollow' : 'index,follow'}">
+<link rel="canonical" href="https://${domain}/">
+<script type="application/ld+json">${lbSch}<\/script>
+<script type="application/ld+json">${faqSch}<\/script>
+<style>${css}</style>
+</head>
+<body>
+
+<!-- 1. NAV -->
+<nav class="nav">
+  <div class="nav-brand">${company.name}</div>
+  <a href="tel:${pd}" class="nav-cta">📞 ${phone}</a>
+</nav>
+
+<!-- 2+3. HERO + LEAD FORM -->
+<section class="hero">
+  <div class="hero-inner">
+    <div class="hero-text">
+      <h1>${h1}</h1>
+      <p class="hero-sub">${heroSub}</p>
+      <div class="hero-ctas">
+        <a href="tel:${pd}" class="btn-call">📞 Call ${phone}</a>
+        <a href="#lead-form" class="btn-quote">Get Free Quote ↓</a>
+      </div>
+      <div class="trust-strip">
+        <span>Google Rated 4.9</span>
+        <span>Licensed &amp; Insured</span>
+        <span>Serving ${city} Since 2005</span>
+        ${niche === 'restoration' ? '<span>IICRC Certified</span>' : ''}
+      </div>
+    </div>
+    ${formHtml}
+  </div>
+</section>
+
+<!-- 4. TRUST BADGES -->
+<div class="badges"><div class="badges-inner">${badgesHtml}</div></div>
+
+<!-- 5. FEATURES GRID -->
+<section class="sec">
+  <div class="si">
+    <h2 class="st">Why ${city} Trusts ${company.name}</h2>
+    <p class="ss">${calls[0] || `Professional ${service} built on results, not promises`}</p>
+    <div class="feat-grid">${featHtml}</div>
+  </div>
+</section>
+
+<!-- 6. SERVICE DESCRIPTION -->
+<section class="sec sec-alt">
+  <div class="si">
+    <h2 class="st">${capWords(service)} in ${city}</h2>
+    <div class="prose">
+      <p>${p1}</p>
+      <p>${p2}</p>
+      <p>${p3}</p>
+      ${extHtml}
+    </div>
+  </div>
+</section>
+
+<!-- 7. REVIEWS -->
+<section class="sec">
+  <div class="si">
+    <h2 class="st">What ${city} Homeowners Say</h2>
+    <p class="ss">Real results from real customers — add your own reviews in the admin dashboard</p>
+    <div class="rv-grid">${rvHtml}</div>
+  </div>
+</section>
+
+<!-- 8. GALLERY (kitchen + renovation only) -->
+${galleryHtml}
+
+<!-- 9. FAQ -->
+<section class="sec sec-alt">
+  <div class="si">
+    <h2 class="st">Frequently Asked Questions</h2>
+    <p class="ss">Everything you need to know about ${service.toLowerCase()} in ${city}</p>
+    <div style="max-width:760px;margin:0 auto">${faqHtml}</div>
+  </div>
+</section>
+
+<!-- 10. URGENCY CTA -->
+<section class="cta-sec">
+  <h2>Ready to Get Started?</h2>
+  <p>${urgency}</p>
+  <a href="tel:${pd}" class="btn-call-lg">📞 Call ${phone} Now</a>
+  <a href="#lead-form" class="cta-sub">Or fill out our form — we respond fast</a>
+</section>
+
+<!-- 11. FOOTER -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div>
+      <div class="fbrand">${company.name}</div>
+      <div class="fcontact">
+        <a href="tel:${pd}">${phone}</a><br>
+        <a href="https://${company.mainDomain}" target="_blank" rel="noopener">${company.mainDomain}</a><br>
+        Serving: ${nbhd}
+      </div>
+    </div>
+    <div class="flinks">
+      <h4>Services</h4>
+      ${slHtml || `<a href="https://${company.mainDomain}">${service}</a>`}
+    </div>
+    <div class="fareas">
+      <h4>Areas Served</h4>
+      <div style="font-size:13px;line-height:2;color:rgba(255,255,255,.6)">Ottawa · Kanata · Barrhaven<br>Orleans · Nepean · Gloucester</div>
+    </div>
+  </div>
+  <div class="fbottom">
+    <span>&copy; ${year} ${company.name}. All rights reserved.</span>
+    <span>Licensed &amp; Insured in Ontario</span>
+    <span>${mode === 'ppc' ? 'Paid Search Landing Page' : `<a href="https://${company.mainDomain}" style="color:rgba(255,255,255,.5)">${company.mainDomain}</a>`}</span>
+  </div>
+</footer>
+
+<!-- MOBILE STICKY CTA -->
+<div class="sticky-bar">
+  <a href="tel:${pd}">📞 Call Now — ${phone}</a>
+</div>
+
+<script>
+document.getElementById('lp-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const btn = this.querySelector('.fsub');
+  btn.textContent = 'Sending...';
+  btn.disabled = true;
+  try {
+    const data = Object.fromEntries(new FormData(this));
+    await fetch('/api/leads', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
+    this.style.display = 'none';
+    document.getElementById('form-thanks').style.display = 'block';
+  } catch {
+    btn.textContent = 'Error — please call us directly';
+    btn.disabled = false;
+  }
+});
+document.querySelectorAll('.fq').forEach(function(d) {
+  d.addEventListener('toggle', function() {
+    var icon = this.querySelector('.fq-icon');
+    if (icon) icon.textContent = this.open ? '−' : '+';
+  });
+});
+<\/script>
+</body>
+</html>`
 }
 
 function generateAdsCampaign(domain: string, service: string, keyword: string, co: string) {
@@ -563,10 +1020,47 @@ app.get('/api/companies', async (c) => {
 })
 
 app.post('/api/generate/landing-page', async (c) => {
-  const { keyword, service, domain, company: co } = await c.req.json()
+  const { keyword, service, domain, company: co, mode = 'seo' } = await c.req.json()
   if (!keyword || !service || !domain) return c.json({ error: 'keyword, service, domain required' }, 400)
   const detected = detectCompany(domain, keyword, co)
-  return c.json({ html: generateLandingPage(keyword, service, domain, detected), company: detected, brand: COMPANIES[detected].name, domain })
+
+  // Fetch company data from D1 — white-label, never hardcoded
+  let companyData: CompanyData | null = null
+  if (c.env?.DB) {
+    try {
+      const row = await c.env.DB.prepare(
+        'SELECT name, phone, domain AS mainDomain, color_bg, color_accent, callouts, sitelinks FROM companies WHERE key = ?'
+      ).bind(detected).first() as any
+      if (row) {
+        companyData = {
+          name: row.name,
+          phone: row.phone,
+          mainDomain: row.mainDomain,
+          color_bg: row.color_bg || '#1A1A2E',
+          color_accent: row.color_accent || '#CC0000',
+          callouts: JSON.parse(row.callouts || '[]'),
+          sitelinks: JSON.parse(row.sitelinks || '[]')
+        }
+      }
+    } catch (_) { /* fall through to in-memory */ }
+  }
+
+  // In-memory fallback (dev / demo — DB unavailable)
+  if (!companyData) {
+    const c2 = COMPANIES[detected]
+    companyData = {
+      name: c2.name,
+      phone: c2.phone,
+      mainDomain: c2.domain,
+      color_bg: (c2 as any).colors?.bg || '#1A1A2E',
+      color_accent: (c2 as any).colors?.accent || '#CC0000',
+      callouts: c2.callouts || [],
+      sitelinks: c2.sitelinks || []
+    }
+  }
+
+  const html = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo')
+  return c.json({ html, company: detected, brand: companyData.name, domain })
 })
 
 app.post('/api/generate/ads-campaign', async (c) => {

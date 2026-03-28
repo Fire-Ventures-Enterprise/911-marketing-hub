@@ -132,6 +132,14 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Keyword research seeds from D1 domain keywords (authorized domains for selected company) + niche+territory combos — never hardcoded seeds
 - Export to CSV: all keyword fields included, filename formatted as `keywords-{territory}-{timestamp}.csv`
 - `sendKwToAds()` and `sendKwToLP()` wire keywords directly to existing generators — keyword research feeds the full pipeline
+- LP Generator PPC vs SEO mode selector: `<select id="lp-mode">` in LP pane; `generateLP()` reads it and passes `mode` in POST body; toast confirms mode: "Generated [SEO] for …"
+- `POST /api/generate/landing-page` fetches company data from D1 (`SELECT … FROM companies WHERE key = ?`), parses JSON `callouts` and `sitelinks` columns, builds `CompanyData` object; falls back to in-memory `COMPANIES` only when DB unavailable (dev/demo); `COMPANIES[detected].name` hardcoded reference replaced — brand name now always comes from D1
+- LP generator `generateLandingPage` signature: `(keyword, service, domain, co, company: CompanyData, mode: 'ppc'|'seo')` — CompanyData carries name, phone, mainDomain, color_bg, color_accent, callouts[], sitelinks[]
+- PPC mode produces `noindex,nofollow` meta + no external links; SEO mode produces `index,follow` + 2 authority outbound links per SEO Linking Doctrine
+- `safeJ()` helper escapes `</script>` in JSON-LD schema strings to prevent premature tag close in generated HTML
+- CSS custom properties in generated LP: `:root { --bg: ${bg}; --ac: ${accent}; }` — single substitution drives all colors throughout the page
+- D1 `companies` table `callouts` and `sitelinks` columns store JSON arrays — always parse with `JSON.parse(row.callouts || '[]')` to avoid runtime errors on null/empty values
+- In-memory COMPANIES fallback: use `(c2 as any).colors?.bg` — TypeScript type may not include `colors` sub-object; cast to `any` to avoid compile errors in fallback path
 
 ---
 

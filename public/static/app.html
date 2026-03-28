@@ -703,6 +703,13 @@
             <div class="ff"><label>Keyword</label><input type="text" id="lp-keyword" placeholder="Auto-filled on select"></div>
             <div class="ff"><label>Service</label><input type="text" id="lp-service" placeholder="Auto-filled on select"></div>
             <div class="ff"><label>Company</label><select id="lp-company"><option value="">Auto-detect</option></select></div>
+            <div class="ff">
+              <label>Page Mode</label>
+              <select id="lp-mode">
+                <option value="seo">SEO — indexed, authority links, full content</option>
+                <option value="ppc">PPC — noindex, no outbound links, conversion focused</option>
+              </select>
+            </div>
           </div>
           <div class="btn-row">
             <button class="btn btn-primary" onclick="generateLP()">⚡ Generate</button>
