@@ -96,3 +96,36 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Any reference to specific company names in code is a bug
 - `npm install` must be run before first deploy in a fresh clone — dependencies are not committed
 - `wrangler pages project create <name>` must be run once before first `wrangler pages deploy` if the project doesn't exist on Cloudflare
+- Always set `compatibility_date` in `wrangler.jsonc` — without it, Cloudflare uses an ancient Workers runtime. Hono v4 calls `Headers.prototype.getSetCookie()` internally when any `Set-Cookie` header is staged; that method does not exist in old runtimes and causes a 500. Fix: `"compatibility_date": "2024-01-01"`
+- When setting `Set-Cookie` response headers in Hono, use a raw `new Response()` with the header inline instead of `c.header('Set-Cookie', ...) + c.json()` — this bypasses Hono's internal header-staging path that calls `getSetCookie` and works on any runtime version
+- Always wrap login/auth route handlers in `try/catch` and return JSON errors — without it, any uncaught exception causes Hono to return `text/plain: "Internal Server Error"`, which causes `r.json()` in the browser to throw, showing a misleading "Network error" instead of the real error
+- Add `app.onError((err, c) => c.json({error: ...}, 500))` to ensure all unhandled Worker errors return JSON, never plain text
+
+---
+
+## CONVERSION DOCTRINE
+
+Every output this platform generates — landing pages, blog posts, SEO content, ad copy, email sequences — exists for one purpose: conversion. A conversion is a phone call, form submission, click, or booked appointment. Never generate content that does not have a clear conversion path. Every landing page has one goal. Every blog post ends with a CTA. Every ad headline earns its character. SEO is not vanity traffic — it is organic lead generation. Quality Score, click-through rate, and conversion rate are the only metrics that matter. If a piece of content does not move someone closer to converting, it does not belong in this platform.
+
+---
+
+## SEO LINKING DOCTRINE
+
+Every piece of content generated must follow this linking structure:
+
+### Internal Links
+- Minimum 2 internal links per blog post pointing to service or landing pages — never just to other blog posts
+- Every landing page links back to the main company domain
+- Anchor text must match target keywords — never use "click here" or "read more"
+- Build topical clusters — service pages, location pages, and blog posts interlinked as one authoritative hub
+
+### External Links
+- Minimum 2 authoritative outbound links per content piece
+- Link to industry authorities relevant to the niche:
+  - **Restoration:** IICRC.org, EPA.gov, insurance carriers
+  - **Renovation:** building codes, permit offices, NARI
+  - **Kitchen:** NKBA, manufacturer specs, material standards
+- All external links open in a new tab (`target="_blank"`)
+- Never link to competitors under any circumstance
+- External links signal research, trust, and authority to Google
+- Pages with zero outbound links look untrustworthy to search engines
