@@ -152,14 +152,27 @@ function generateSeoContent(domain: string, keyword: string, service: string, co
 // ── AUTH HELPERS ─────────────────────────────────────────────────────────
 
 async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [, saltHex, storedHash] = stored.split(':')
-  if (!saltHex || !storedHash) return false
-  const enc = new TextEncoder()
-  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
-  const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits'])
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, key, 256)
-  const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('')
-  return hashHex === storedHash
+  try {
+    const parts = stored.split(':')
+    if (parts.length !== 3) return false
+    const saltHex = parts[1]
+    const storedHash = parts[2]
+    if (!saltHex || !storedHash) return false
+    const enc = new TextEncoder()
+    const saltBytes = saltHex.match(/.{2}/g)
+    if (!saltBytes) return false
+    const salt = new Uint8Array(saltBytes.map((b: string) => parseInt(b, 16)))
+    const key = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits'])
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 100000, hash: { name: 'SHA-256' } },
+      key, 256
+    )
+    const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('')
+    return hashHex === storedHash
+  } catch (err: any) {
+    console.error('[verifyPassword Error]', err?.message)
+    return false
+  }
 }
 
 function getToken(c: any): string | null {
@@ -177,6 +190,12 @@ const SKIP_AUTH = new Set([
 ])
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
+
+// Always return JSON for unhandled errors — prevents "Network error" in the browser
+app.onError((err, c) => {
+  console.error('[SLM Error]', err.message, err.stack)
+  return c.json({ error: 'Internal server error', detail: err.message }, 500)
+})
 app.use('/api/*', cors({ origin: '*', allowMethods: ['POST', 'GET', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }))
 app.use('/api/*', async (c, next) => {
   const key = `${c.req.method} ${new URL(c.req.url).pathname}`
@@ -277,28 +296,64 @@ app.get('/api/leads', async (c) => {
 // ── SLM AUTH ──────────────────────────────────────────────────────────────
 
 app.post('/api/auth/login', async (c) => {
-  const { email, password } = await c.req.json()
-  if (!email || !password) return c.json({ error: 'Email and password required' }, 400)
-  if (!c.env?.DB) return c.json({ error: 'Database not configured' }, 500)
-  const user = await c.env.DB.prepare('SELECT * FROM users WHERE email = ? AND active = 1').bind(email.toLowerCase().trim()).first() as any
-  if (!user) return c.json({ error: 'Invalid credentials' }, 401)
-  const valid = await verifyPassword(password, user.password_hash)
-  if (!valid) return c.json({ error: 'Invalid credentials' }, 401)
-  const sessionId = crypto.randomUUID()
-  const token = crypto.randomUUID()
-  const now = new Date().toISOString()
-  const expiresAt = new Date(Date.now() + 86400000).toISOString()
-  await c.env.DB.prepare('INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)').bind(sessionId, user.id, token, expiresAt, now).run()
-  await c.env.DB.prepare('UPDATE users SET last_login = ? WHERE id = ?').bind(now, user.id).run()
-  c.header('Set-Cookie', `slm_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`)
-  return c.json({ success: true, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id, name: user.name } })
+  try {
+    const body = await c.req.json().catch(() => ({}))
+    const { email, password } = body as any
+    if (!email || !password) return c.json({ error: 'Email and password required' }, 400)
+    if (!c.env?.DB) return c.json({ error: 'Database not configured' }, 500)
+
+    const user = await c.env.DB.prepare(
+      'SELECT id, email, password_hash, role, company_id, name, active FROM users WHERE email = ? AND active = 1'
+    ).bind(String(email).toLowerCase().trim()).first() as any
+
+    if (!user) return c.json({ error: 'Invalid credentials' }, 401)
+
+    const valid = await verifyPassword(String(password), String(user.password_hash))
+    if (!valid) return c.json({ error: 'Invalid credentials' }, 401)
+
+    const sessionId = crypto.randomUUID()
+    const token = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const expiresAt = new Date(Date.now() + 86400000).toISOString()
+
+    await c.env.DB.prepare(
+      'INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(sessionId, user.id, token, expiresAt, now).run()
+
+    await c.env.DB.prepare(
+      'UPDATE users SET last_login = ? WHERE id = ?'
+    ).bind(now, user.id).run()
+
+    // Return raw Response — bypasses Hono's Set-Cookie header staging which calls
+    // Headers.prototype.getSetCookie() (unavailable in some CF Workers runtimes)
+    return new Response(JSON.stringify({
+      success: true,
+      user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id, name: user.name }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `slm_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`
+      }
+    })
+  } catch (err: any) {
+    console.error('[Login Error]', err?.message, err?.stack)
+    return c.json({ error: 'Login failed', detail: err?.message }, 500)
+  }
 })
 
 app.post('/api/auth/logout', async (c) => {
-  const token = getToken(c)
-  if (token && c.env?.DB) await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run()
-  c.header('Set-Cookie', 'slm_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0')
-  return c.json({ success: true })
+  try {
+    const token = getToken(c)
+    if (token && c.env?.DB) await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run()
+  } catch {}
+  return new Response(JSON.stringify({ success: true }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Set-Cookie': 'slm_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0'
+    }
+  })
 })
 
 app.get('/api/auth/me', async (c) => {
