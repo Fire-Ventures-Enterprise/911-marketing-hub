@@ -3,6 +3,7 @@
 
 let allDomains   = [];
 let allCompanies = [];
+let currentUser  = null;
 let lastLpHtml       = '';
 let lastAdsCampaign  = null;
 let lastSeoContent   = null;
@@ -24,6 +25,7 @@ async function checkAuth() {
     if (!user) { window.location.replace('/login'); return Promise.reject(); }
     const badge  = document.getElementById('role-badge');
     const nameEl = document.getElementById('user-name');
+    currentUser = user;
     if (badge) {
       badge.textContent = user.role;
       const c = ROLE_COLORS[user.role] || ROLE_COLORS.staff;
@@ -171,7 +173,7 @@ async function loadDomains() {
     if (allCompanies.length) _renderDashboardCompanies();
   } catch(e) {
     const tbody = document.getElementById('domains-tbody');
-    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--tx3);padding:20px">Error: ${e.message}</td></tr>`;
+    if (tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--tx3);padding:20px">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -186,14 +188,32 @@ function _updateDashStats() {
 function renderDomains(domains) {
   const tbody = document.getElementById('domains-tbody');
   if (!domains || !domains.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--tx3);padding:20px">No domains found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--tx3);padding:20px">No domains found.</td></tr>';
     return;
   }
-  const esc = s => String(s).replace(/'/g, "\\'");
+  const esc  = s => String(s).replace(/'/g, "\\'");
+  const isSA = currentUser?.role === 'super_admin';
   tbody.innerHTML = domains.map(d => {
-    const cat    = d.category === 'emergency' ? 'pill-emergency' : d.category === 'renovation' ? 'pill-renovation' : 'pill-kitchen';
-    const status = d.status === 'Active' ? 'pill-active' : d.status === 'Building' ? 'pill-building' : 'pill-parked';
-    return `<tr onclick="fillFromDomain('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')" style="cursor:pointer">
+    const cat      = d.category === 'emergency' ? 'pill-emergency' : d.category === 'renovation' ? 'pill-renovation' : 'pill-kitchen';
+    const status   = d.status === 'Active' ? 'pill-active' : d.status === 'Building' ? 'pill-building' : 'pill-parked';
+    const authOk   = d.authorized === 1 || d.authorized === true;
+    const authBadge = authOk
+      ? `<span class="pill pill-auth-ok">✓ Auth</span>`
+      : `<span class="pill pill-auth-pending">Pending</span>`;
+    const genBtns  = authOk
+      ? `<button class="qf qf-lp"  onclick="event.stopPropagation();fillLP('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">LP</button>
+         <button class="qf qf-ads" onclick="event.stopPropagation();fillAds('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">ADS</button>`
+      : '';
+    const adminBtn  = isSA
+      ? authOk
+        ? `<button class="qf qf-revoke" onclick="event.stopPropagation();authorizeDomain(${d.id},'revoke')">Revoke</button>`
+        : `<button class="qf qf-auth"   onclick="event.stopPropagation();authorizeDomain(${d.id},'authorize')">✓ Auth</button>`
+      : '';
+    const rowClick  = authOk
+      ? `fillFromDomain('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')`
+      : `toast('Domain not yet authorized — pending super admin approval','error')`;
+    const rowStyle  = `cursor:pointer${authOk ? '' : ';opacity:0.55'}`;
+    return `<tr onclick="${rowClick}" style="${rowStyle}">
       <td><strong>${d.domain}</strong></td>
       <td style="color:var(--tx3)">${d.keyword}</td>
       <td>${d.service}</td>
@@ -201,18 +221,34 @@ function renderDomains(domains) {
       <td style="color:#4ade80">$${d.budget}/day</td>
       <td><span class="pill ${status}">${d.status}</span></td>
       <td class="p${d.priority}">${d.priority}</td>
-      <td>
-        <button class="qf qf-lp"  onclick="event.stopPropagation();fillLP('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">LP</button>
-        <button class="qf qf-ads" onclick="event.stopPropagation();fillAds('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">ADS</button>
-      </td>
+      <td>${authBadge}</td>
+      <td>${genBtns}${adminBtn}</td>
     </tr>`;
   }).join('');
+}
+
+// ── DOMAIN AUTHORIZATION ──────────────────────────────────────────────────
+
+async function authorizeDomain(id, action) {
+  try {
+    const r = await fetch(`/api/domains/${id}/${action}`, { method: 'POST' });
+    const data = await r.json();
+    if (r.ok && data.success) {
+      toast(action === 'authorize' ? '✓ Domain authorized' : 'Authorization revoked');
+      loadDomains();
+    } else {
+      toast(data.error || 'Failed', 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
 }
 
 function filterDomains(filter, el) {
   document.querySelectorAll('.ftab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  const filtered = filter === 'all' ? allDomains
+  const filtered = filter === 'all'     ? allDomains
+    : filter === 'pending'              ? allDomains.filter(d => !d.authorized)
     : ['emergency','renovation','kitchen'].includes(filter)
       ? allDomains.filter(d => d.category === filter)
       : allDomains.filter(d => d.status === filter);

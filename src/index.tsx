@@ -224,17 +224,52 @@ app.get('/api/status', (c) => {
   })
 })
 
-app.get('/api/domains', (c) => {
-  const user = c.get('user')
-  let all = [
-    ...DOMAINS.emergency.map(d => ({ ...d, category: 'emergency' })),
-    ...DOMAINS.renovation.map(d => ({ ...d, category: 'renovation' })),
-    ...DOMAINS.kitchen.map(d => ({ ...d, category: 'kitchen' }))
-  ]
-  if (user && user.role !== 'super_admin' && user.company_key) {
-    all = all.filter(d => d.co === user.company_key)
+app.get('/api/domains', async (c) => {
+  // Read from D1 — includes authorization columns added in 0004_domain_auth.sql
+  // Falls back to in-memory DOMAINS if DB is unavailable (dev/demo mode)
+  if (!c.env?.DB) {
+    const user = c.get('user')
+    let all = [
+      ...DOMAINS.emergency.map(d => ({ ...d, category: 'emergency', authorized: 1, authorized_by: null, authorized_at: null, owned_by_tenant: 0 })),
+      ...DOMAINS.renovation.map(d => ({ ...d, category: 'renovation', authorized: 1, authorized_by: null, authorized_at: null, owned_by_tenant: 0 })),
+      ...DOMAINS.kitchen.map(d => ({ ...d, category: 'kitchen', authorized: 1, authorized_by: null, authorized_at: null, owned_by_tenant: 0 }))
+    ]
+    if (user && user.role !== 'super_admin' && user.company_key) {
+      all = all.filter(d => d.co === user.company_key)
+    }
+    return c.json({ total: all.length, domains: all })
   }
-  return c.json({ total: all.length, domains: all })
+  const user = c.get('user')
+  const base = 'SELECT id, domain, keyword, service, budget, status, priority, notes, company AS co, category, authorized, authorized_by, authorized_at, owned_by_tenant FROM domains'
+  let result
+  if (user && user.role !== 'super_admin' && user.company_key) {
+    result = await c.env.DB.prepare(base + ' WHERE company = ? ORDER BY authorized DESC, priority ASC, domain ASC').bind(user.company_key).all()
+  } else {
+    result = await c.env.DB.prepare(base + ' ORDER BY authorized DESC, category ASC, priority ASC, domain ASC').all()
+  }
+  const domains = result.results || []
+  return c.json({ total: domains.length, domains })
+})
+
+app.post('/api/domains/:id/authorize', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden — super admin only' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'Database not configured' }, 500)
+  const id = parseInt(c.req.param('id'))
+  if (!id || isNaN(id)) return c.json({ error: 'Invalid domain id' }, 400)
+  const now = new Date().toISOString()
+  await c.env.DB.prepare('UPDATE domains SET authorized = 1, authorized_by = ?, authorized_at = ? WHERE id = ?').bind(user.id, now, id).run()
+  return c.json({ success: true, authorized: true })
+})
+
+app.post('/api/domains/:id/revoke', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden — super admin only' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'Database not configured' }, 500)
+  const id = parseInt(c.req.param('id'))
+  if (!id || isNaN(id)) return c.json({ error: 'Invalid domain id' }, 400)
+  await c.env.DB.prepare('UPDATE domains SET authorized = 0, authorized_by = NULL, authorized_at = NULL WHERE id = ?').bind(id).run()
+  return c.json({ success: true, authorized: false })
 })
 
 app.get('/api/companies', async (c) => {

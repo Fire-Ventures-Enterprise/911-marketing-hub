@@ -27,7 +27,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`
 
 ### KV Namespace
 - **Name:** `Services-Leads-Marketing-Hub-KV`
@@ -61,6 +61,8 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 |------|-------------|
 | `migrations/0001_initial.sql` | Creates `leads` table + indexes |
 | `migrations/0002_seed.sql` | Creates `companies` + `domains` tables, seeds all 3 companies and 33 domains |
+| `migrations/0003_auth.sql` | Creates `users` + `sessions` tables; seeds super admin Nasser Oweis |
+| `migrations/0004_domain_auth.sql` | Adds `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` to `domains`; pre-authorizes all 33 existing domains |
 
 ---
 
@@ -100,6 +102,9 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - When setting `Set-Cookie` response headers in Hono, use a raw `new Response()` with the header inline instead of `c.header('Set-Cookie', ...) + c.json()` — this bypasses Hono's internal header-staging path that calls `getSetCookie` and works on any runtime version
 - Always wrap login/auth route handlers in `try/catch` and return JSON errors — without it, any uncaught exception causes Hono to return `text/plain: "Internal Server Error"`, which causes `r.json()` in the browser to throw, showing a misleading "Network error" instead of the real error
 - Add `app.onError((err, c) => c.json({error: ...}, 500))` to ensure all unhandled Worker errors return JSON, never plain text
+- `GET /api/domains` was reading from a hardcoded in-memory object, not D1 — this is a bug; always read domain data from D1 so authorization and other DB-backed fields are returned correctly
+- D1 `domains` table uses `company` as the column name; the frontend uses `d.co` — alias with `company AS co` in SQL to avoid rewriting all frontend references
+- Domain authorization: `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` columns added via `ALTER TABLE` in migration `0004_domain_auth.sql`; pre-authorize all existing rows with `UPDATE domains SET authorized = 1 ...` in the same migration
 
 ---
 

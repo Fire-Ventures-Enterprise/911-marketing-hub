@@ -194,6 +194,11 @@
     }
     .tb-link:hover { background: var(--bd); color: var(--tx2); }
 
+    .pill-auth-ok      { background: rgba(74,222,128,0.12);  color: #4ade80; border-color: rgba(74,222,128,0.3); }
+    .pill-auth-pending { background: rgba(245,158,11,0.12);  color: #F59E0B; border-color: rgba(245,158,11,0.3); }
+    .qf-auth   { background: rgba(74,222,128,0.12);  color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+    .qf-revoke { background: rgba(239,68,68,0.10);   color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+
     .role-badge {
       font-size: 10px;
       font-weight: 700;
@@ -616,11 +621,12 @@
           <button class="ftab" onclick="filterDomains('Active',this)">Active</button>
           <button class="ftab" onclick="filterDomains('Building',this)">Building</button>
           <button class="ftab" onclick="filterDomains('Parked',this)">Parked</button>
+          <button class="ftab" onclick="filterDomains('pending',this)" style="color:#F59E0B">⏳ Pending</button>
         </div>
         <div class="tbl-wrap">
           <table>
-            <thead><tr><th>Domain</th><th>Keyword</th><th>Service</th><th>Company</th><th>Budget</th><th>Status</th><th>P</th><th>Actions</th></tr></thead>
-            <tbody id="domains-tbody"><tr><td colspan="8" style="text-align:center;color:var(--tx3);padding:24px">Loading…</td></tr></tbody>
+            <thead><tr><th>Domain</th><th>Keyword</th><th>Service</th><th>Company</th><th>Budget</th><th>Status</th><th>P</th><th>Auth</th><th>Actions</th></tr></thead>
+            <tbody id="domains-tbody"><tr><td colspan="9" style="text-align:center;color:var(--tx3);padding:24px">Loading…</td></tr></tbody>
           </table>
         </div>
       </div>
