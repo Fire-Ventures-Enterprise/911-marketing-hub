@@ -1271,6 +1271,7 @@ app.get('/api/porkbun/ping', async (c) => {
 
 // POST /api/porkbun/check — check availability for one or more domains (super_admin only)
 // Body: { domains: ["example.com", "example.ca"] }
+// NOTE: Porkbun rate limit is 1 checkDomain call per 10 seconds — checks run sequentially
 app.post('/api/porkbun/check', async (c) => {
   const user = c.get('user')
   if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
@@ -1280,16 +1281,17 @@ app.post('/api/porkbun/check', async (c) => {
   const { domains } = await c.req.json() as { domains: string[] }
   if (!domains?.length) return c.json({ error: 'domains array required' }, 400)
 
-  const results = await Promise.all(
-    domains.map(async (domain: string) => {
-      try {
-        const data = await porkbunPost(c.env, `/domain/checkDomain/${domain}`)
-        return { domain, ...data }
-      } catch (err: any) {
-        return { domain, status: 'ERROR', error: err?.message }
-      }
-    })
-  )
+  // Sequential with 11s delay between checks to respect Porkbun rate limit (1/10s)
+  const results: any[] = []
+  for (let i = 0; i < domains.length; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, 11000))
+    try {
+      const data = await porkbunPost(c.env, `/domain/checkDomain/${domains[i]}`)
+      results.push({ domain: domains[i], ...data })
+    } catch (err: any) {
+      results.push({ domain: domains[i], status: 'ERROR', error: err?.message })
+    }
+  }
   return c.json({ results })
 })
 

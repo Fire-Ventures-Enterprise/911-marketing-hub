@@ -155,6 +155,10 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Pages secrets must be set separately for production and preview environments if needed
 - `wrangler pages secret list --project-name <project>` confirms what is actually visible to the Pages Function; check this first when a secret appears missing
 - Never put real API keys in `wrangler.jsonc` vars — Cloudflare rejects it if a secret with the same name already exists (binding name collision); use comments in wrangler.jsonc to document that secrets exist, not vars
+- Porkbun `checkDomain` rate limit: **1 call per 10 seconds** — always check domains sequentially with 11s delay; parallel checks cause all but the first to return `status: "ERROR"` with rate limit message
+- Porkbun `checkDomain` response fields: `response.avail` ("yes"/"no"), `response.price` (promo reg price), `response.regularPrice`, `response.additional.renewal.price`, `response.additional.transfer.price`
+- Porkbun Pages secrets confirmed working after redeploy — secrets only take effect on next Pages deployment, not immediately after `wrangler pages secret put`
+- **Domain availability results (2026-03-28):** `basementfloodedottawa.ca` → AVAILABLE $8.88/yr | `waterdamageottawa.ca` → AVAILABLE $8.88/yr | `kitchencabinetsottawa.ca` → TAKEN (unavailable)
 
 ---
 
