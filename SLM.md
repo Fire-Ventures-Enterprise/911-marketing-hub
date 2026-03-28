@@ -151,3 +151,39 @@ SLM.md is a living document. It must be updated every single session without exc
 5. Commit the updated SLM.md with every push — never push code without also pushing an updated SLM.md
 
 If SLM.md is not updated, the next session starts blind. An outdated SLM.md is a failed session regardless of what code was written. Treat SLM.md like a captain's log — every session gets an entry, every decision gets recorded.
+
+---
+
+## DOMAIN OWNERSHIP DOCTRINE (Model A — Locked)
+
+All domains registered and deployed through this platform are owned by Fire Ventures Enterprise. This is non-negotiable and applies to every client onboarded regardless of company size.
+
+### Ownership Rules
+- Fire Ventures Enterprise registers all domains
+- Clients are granted a usage license as part of their monthly platform subscription
+- If a client cancels or is removed, all domains remain the property of Fire Ventures Enterprise
+- Domains are platform infrastructure assets — not client assets
+- Contracts must explicitly state: domains are licensed, not sold
+- Client may purchase a domain outright at Fire Ventures Enterprise discretion for a separate negotiated fee
+
+### Territory Protection
+- No two clients can hold the same territory + keyword combination
+- Territory is defined by city, region, or postal code zone
+- When a new domain is added, the platform checks for territory conflicts automatically
+- Conflicting territories are flagged and blocked until resolved
+- Super admin resolves all territory conflicts
+- Available angles for same-city clients:
+  1. Geographic segmentation (different zones/suburbs)
+  2. Niche segmentation (luxury vs budget vs specialty)
+  3. Service segmentation (different service lines)
+
+### Geographic Segmentation Rule
+Multiple clients in the same niche must be separated by:
+- Distinct geographic territory (city, suburb, postal zone)
+- OR distinct niche angle (luxury, budget, specialty)
+- OR distinct service line (different services, not competing)
+
+Never run two clients bidding on identical keyword + location. This protects all clients and maintains platform integrity.
+
+### Database Requirements
+The `domains` table must include `territory` and `niche_angle` fields so conflicts can be detected automatically.
