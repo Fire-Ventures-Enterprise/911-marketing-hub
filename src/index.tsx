@@ -659,12 +659,12 @@ app.onError((err, c) => {
   return c.json({ error: 'Internal server error', detail: err.message }, 500)
 })
 
-// slmhub.com → slmhub.ca — 301 permanent redirect (must run before all other middleware)
+// slm-hub.com → slm-hub.ca — 301 permanent redirect (must run before all other middleware)
 app.use('*', async (c, next) => {
   const host = c.req.header('host') || ''
-  if (host === 'slmhub.com' || host === 'www.slmhub.com') {
+  if (host === 'slm-hub.com' || host === 'www.slm-hub.com') {
     const url = new URL(c.req.url)
-    url.hostname = 'slmhub.ca'
+    url.hostname = 'slm-hub.ca'
     return c.redirect(url.toString(), 301)
   }
   return next()

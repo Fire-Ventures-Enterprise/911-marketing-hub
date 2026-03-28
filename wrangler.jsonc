@@ -20,11 +20,13 @@
   // Do NOT add them to vars — Cloudflare rejects duplicate binding names across secrets + vars.
 
   // Custom domains (added via Cloudflare Pages API — no wrangler.jsonc field exists for Pages domains):
-  //   PRIMARY:  slmhub.ca  (CF domain ID: 55a8cd2c-e2fd-4f0c-be9b-70aebc1270e9)
-  //   REDIRECT: slmhub.com → slmhub.ca 301 (handled in Hono middleware + CF domain ID: 53474f8c-6807-4775-b08a-0a42af0067cd)
+  //   PRIMARY:  slm-hub.ca  (CF domain ID: c4a0e717-0e71-4e10-a455-35b382fc000b) — status: active
+  //   REDIRECT: slm-hub.com → slm-hub.ca 301 (Hono middleware + CF domain ID: 75bc66d5-f60a-4054-8a98-47af83c33467) — status: active
   //   FALLBACK: services-leads-marketing-hub.pages.dev (always active)
   //
   // DNS required at Porkbun for each domain:
-  //   slmhub.ca  — CNAME @ → services-leads-marketing-hub.pages.dev
-  //   slmhub.com — CNAME @ → services-leads-marketing-hub.pages.dev
+  //   slm-hub.ca  — CNAME @ → services-leads-marketing-hub.pages.dev
+  //   slm-hub.com — CNAME @ → services-leads-marketing-hub.pages.dev
+  //
+  // COMMON MISTAKE: domains are slm-hub.ca / slm-hub.com (hyphenated) — never slmhub without hyphen
 }
