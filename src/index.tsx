@@ -1306,4 +1306,196 @@ app.post('/api/porkbun/check', async (c) => {
   return c.json({ results })
 })
 
+// POST /api/porkbun/import-all — import all Porkbun account domains into D1 (super_admin only)
+app.post('/api/porkbun/import-all', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) return c.json({ error: 'Porkbun credentials not configured' }, 503)
+  if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
+
+  try {
+    // Fetch all domains — paginate in batches of 1000
+    let allPb: any[] = []
+    let start = 0
+    while (true) {
+      const data = await porkbunPost(c.env, '/domain/listAll', { includeLabels: 'yes', start: String(start) })
+      if (data.status !== 'SUCCESS') break
+      const batch: any[] = data.domains || []
+      allPb = allPb.concat(batch)
+      if (batch.length < 1000) break
+      start += 1000
+    }
+
+    const now = new Date().toISOString()
+
+    // Pre-load operational domains + companies for linking (avoids N+1 queries)
+    const [domsRes, cosRes, existingRes] = await Promise.all([
+      c.env.DB.prepare('SELECT id, domain, company FROM domains').all(),
+      c.env.DB.prepare('SELECT id, key FROM companies').all(),
+      c.env.DB.prepare('SELECT domain FROM domain_registrations').all()
+    ])
+    const domsMap    = new Map((domsRes.results   || []).map((r: any) => [r.domain, r]))
+    const cosMap     = new Map((cosRes.results    || []).map((r: any) => [r.key,    r.id]))
+    const existingSet = new Set((existingRes.results || []).map((r: any) => r.domain))
+
+    let inserted = 0, updated = 0
+    const stmts: any[] = []
+
+    for (const pb of allPb) {
+      const linked    = domsMap.get(pb.domain) as any
+      const companyId = linked ? (cosMap.get(linked.company) ?? 0) : 0
+      const domainId  = linked?.id ?? null
+      // Porkbun dates come as "YYYY-MM-DD HH:MM:SS" — extract date part only for SQLite date() functions
+      const expiresAt = pb.expireDate ? pb.expireDate.split(' ')[0] : null
+
+      if (existingSet.has(pb.domain)) {
+        stmts.push(c.env.DB.prepare(
+          'UPDATE domain_registrations SET status=?,expires_at=?,auto_renew=?,security_lock=?,whois_privacy=?,labels=?,company_id=?,domain_id=?,updated_at=? WHERE domain=?'
+        ).bind(pb.status||'ACTIVE', expiresAt, pb.autoRenew==='1'?1:0, pb.securityLock==='1'?1:0, pb.whoisPrivacy==='1'?1:0, JSON.stringify(pb.labels||[]), companyId, domainId, now, pb.domain))
+        updated++
+      } else {
+        stmts.push(c.env.DB.prepare(
+          'INSERT INTO domain_registrations (company_id,domain,tld,registrar,status,expires_at,auto_renew,security_lock,whois_privacy,labels,domain_id,imported_at,updated_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        ).bind(companyId, pb.domain, pb.tld||null, 'porkbun', pb.status||'ACTIVE', expiresAt, pb.autoRenew==='1'?1:0, pb.securityLock==='1'?1:0, pb.whoisPrivacy==='1'?1:0, JSON.stringify(pb.labels||[]), domainId, now, now, pb.createDate||now))
+        inserted++
+      }
+    }
+
+    // Batch execute in groups of 50 (D1 batch limit)
+    for (let i = 0; i < stmts.length; i += 50) {
+      await c.env.DB.batch(stmts.slice(i, i + 50))
+    }
+
+    if (c.env?.KV) await c.env.KV.put('porkbun:last_sync', now, { expirationTtl: 60 * 60 * 24 * 365 })
+
+    return c.json({ success: true, total: allPb.length, inserted, updated, synced_at: now })
+  } catch (err: any) {
+    return c.json({ error: 'Import failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/porkbun/sync-status — compare Porkbun registry vs D1 operational domains (super_admin only)
+app.get('/api/porkbun/sync-status', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
+
+  try {
+    const [regRes, d1Res, expiryRes, unsyncedRes] = await Promise.all([
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM domain_registrations').first() as Promise<any>,
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM domains').first() as Promise<any>,
+      c.env.DB.prepare("SELECT domain, expires_at, auto_renew FROM domain_registrations WHERE expires_at IS NOT NULL AND expires_at <= date('now', '+30 days') ORDER BY expires_at ASC").all(),
+      c.env.DB.prepare("SELECT d.domain FROM domains d LEFT JOIN domain_registrations dr ON d.domain = dr.domain WHERE dr.id IS NULL").all()
+    ])
+    const lastSync = c.env?.KV ? await c.env.KV.get('porkbun:last_sync') : null
+    const expiring = (expiryRes.results || []).map((r: any) => ({
+      ...r,
+      days_left: Math.ceil((new Date(r.expires_at).getTime() - Date.now()) / 86400000)
+    }))
+
+    return c.json({
+      porkbun_total:    regRes?.cnt ?? 0,
+      d1_total:         d1Res?.cnt  ?? 0,
+      unsynced_domains: (unsyncedRes.results || []).map((r: any) => r.domain),
+      expiring_soon:    expiring,
+      last_sync:        lastSync
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Sync status failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/porkbun/register — purchase domain + configure DNS + save to D1 (super_admin only)
+app.post('/api/porkbun/register', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) return c.json({ error: 'Porkbun credentials not configured' }, 503)
+  if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
+
+  const { domain, years = '1' } = await c.req.json() as { domain: string; years?: string }
+  if (!domain) return c.json({ error: 'domain required' }, 400)
+
+  const steps: Array<{ step: string; status: 'ok' | 'error' | 'pending'; detail?: string }> = []
+  const now = new Date().toISOString()
+
+  // Step 1: Register with Porkbun
+  try {
+    const reg = await porkbunPost(c.env, `/domain/create/${domain}`, {
+      years, autorenew: '1', agreement: 'yes', agreeToTerms: 'yes'
+    })
+    if (reg.status !== 'SUCCESS') {
+      return c.json({ error: 'Registration failed', detail: reg.message || JSON.stringify(reg), steps }, 400)
+    }
+    steps.push({ step: 'register', status: 'ok' })
+  } catch (err: any) {
+    return c.json({ error: 'Registration API error', detail: err?.message, steps }, 500)
+  }
+
+  // Step 2: Save to D1
+  try {
+    const expiresAt = new Date(Date.now() + parseInt(years) * 365.25 * 86400000).toISOString().split('T')[0]
+    await c.env.DB.prepare(
+      'INSERT OR REPLACE INTO domain_registrations (company_id,domain,tld,registrar,status,expires_at,auto_renew,whois_privacy,labels,imported_at,updated_at,created_at) VALUES (?,?,?,?,?,?,1,1,?,?,?,?)'
+    ).bind(0, domain, domain.split('.').pop()||'', 'porkbun', 'ACTIVE', expiresAt, '[]', now, now, now).run()
+    steps.push({ step: 'save_d1', status: 'ok' })
+  } catch (err: any) {
+    steps.push({ step: 'save_d1', status: 'error', detail: err?.message })
+  }
+
+  // Step 3: Configure DNS — CNAME @ → pages project (WHOIS privacy auto by Porkbun)
+  try {
+    const dns = await porkbunPost(c.env, `/dns/create/${domain}`, {
+      type: 'CNAME', host: '@', answer: 'services-leads-marketing-hub.pages.dev', ttl: '600'
+    })
+    const ok = dns.status === 'SUCCESS'
+    steps.push({ step: 'dns_cname', status: ok ? 'ok' : 'error', detail: ok ? undefined : dns.message })
+    if (ok) {
+      await c.env.DB.prepare('UPDATE domain_registrations SET dns_configured=1,updated_at=? WHERE domain=?').bind(now, domain).run()
+    }
+  } catch (err: any) {
+    steps.push({ step: 'dns_cname', status: 'error', detail: err?.message })
+  }
+
+  // Step 4: Generate LP — remind user to complete in UI
+  steps.push({ step: 'generate_lp',   status: 'pending', detail: 'Open LP Generator tab and generate for this domain' })
+  steps.push({ step: 'activate_leads', status: 'pending', detail: 'Assign domain to a company in Domain Army' })
+  steps.push({ step: 'cf_custom_domain', status: 'pending', detail: 'Add manually: CF Pages Dashboard → Custom Domains' })
+
+  // Store expiry alert in KV if within 30 days (unlikely at registration but future-proof)
+  if (c.env?.KV) {
+    const daysOut = parseInt(years) * 365
+    if (daysOut <= 30) {
+      const expiry = new Date(Date.now() + daysOut * 86400000).toISOString()
+      await c.env.KV.put(`expiry-alert:${domain}`, expiry, { expirationTtl: 60 * 60 * 24 * 60 })
+    }
+  }
+
+  return c.json({ success: true, domain, steps, registered_at: now })
+})
+
+// GET /api/porkbun/expiry-alerts — domains expiring within 30 days (super_admin only)
+app.get('/api/porkbun/expiry-alerts', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
+
+  try {
+    const result = await c.env.DB.prepare(
+      "SELECT dr.domain, dr.expires_at, dr.auto_renew, co.name as company_name FROM domain_registrations dr LEFT JOIN companies co ON dr.company_id = co.id WHERE dr.expires_at IS NOT NULL AND dr.expires_at <= date('now', '+30 days') ORDER BY dr.expires_at ASC"
+    ).all()
+    const alerts = (result.results || []).map((r: any) => ({
+      ...r,
+      days_left: Math.ceil((new Date(r.expires_at).getTime() - Date.now()) / 86400000)
+    }))
+    if (c.env?.KV) {
+      for (const a of alerts) {
+        await c.env.KV.put(`expiry-alert:${a.domain}`, JSON.stringify(a), { expirationTtl: 60 * 60 * 24 * 7 })
+      }
+    }
+    return c.json({ count: alerts.length, alerts })
+  } catch (err: any) {
+    return c.json({ error: 'Expiry check failed', detail: err?.message }, 500)
+  }
+})
+
 export default app

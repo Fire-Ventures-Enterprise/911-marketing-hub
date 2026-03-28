@@ -29,7 +29,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`
 
 ### KV Namespace
 - **Name:** `Services-Leads-Marketing-Hub-KV`
@@ -71,6 +71,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0005_domain_auth_correction.sql` | Corrects 0004: resets Building and Parked domains to `authorized = 0`; only Active domains remain authorized |
 | `migrations/0006_territory_niche.sql` | Documents `territory` and `niche_angle` columns (added directly to D1 before migration file existed); adds `idx_domains_territory` and `idx_domains_niche_angle` indexes |
 | `migrations/0007_keywords.sql` | Creates `keywords` table + 6 indexes; stores keyword research results linked to domains and companies |
+| `migrations/0008_domain_registrations.sql` | Adds Porkbun sync columns (whois_privacy, security_lock, labels, domain_id, imported_at, updated_at) + 5 indexes to pre-existing `domain_registrations` table |
 
 ---
 
@@ -170,6 +171,17 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Custom domain activation requires DNS at Porkbun: `CNAME @ → services-leads-marketing-hub.pages.dev` for each domain; Cloudflare validates via HTTP challenge once DNS propagates
 - slm-hub.com → slm-hub.ca redirect is handled by Hono middleware (host header check, 301) so it works regardless of DNS/CF routing
 - Google OAuth redirect URI updated to `slm-hub.ca` in `serviceleads.html` — update the authorized URI in Google Cloud Console to match
+- `domain_registrations` table existed before 0008 with a base schema (created in a prior session) — 0008 adds columns via ALTER TABLE, not DROP/CREATE; always check `sqlite_master` before applying migrations to avoid "no such column" errors from duplicate CREATE TABLE IF NOT EXISTS followed by CREATE INDEX
+- `domain_registrations` existing columns: id (INTEGER AUTOINCREMENT), company_id, domain, tld, registrar, registrar_order_id, status, registered_at, expires_at, auto_renew, purchase_price, renewal_price, dns_configured, landing_page_created, lead_form_active, created_at — added by 0008: whois_privacy, security_lock, labels, domain_id, imported_at, updated_at
+- Porkbun `listAll` response: `domain.expireDate` is "YYYY-MM-DD HH:MM:SS" — split on space and take [0] before storing in D1 for SQLite date() compatibility
+- Import-all uses D1 `.batch()` in groups of 50 to avoid per-domain N+1 queries; pre-loads domains + companies maps in 3 queries total
+- Browser-side domain search handles 11s rate-limit delays (countdown timer per domain) — server only checks 1 domain per request; no Worker timeout risk
+- `_normSlug()` normalises keyword/city inputs to lowercase alphanumeric for domain pattern generation
+- Domain search generates 3 patterns × selected extensions: `{kw}{city}`, `{city}{kw}`, `{kw}in{city}`
+- Registration flow steps: register → save_d1 → dns_cname → generate_lp (pending/manual) → activate_leads (pending/manual) → cf_custom_domain (pending/manual)
+- Porkbun register endpoint uses both `agreement: "yes"` AND `agreeToTerms: "yes"` to handle API field name ambiguity
+- `GET /api/porkbun/sync-status`, `POST /api/porkbun/import-all`, `POST /api/porkbun/register`, `GET /api/porkbun/expiry-alerts` — all super_admin only
+- Migration table updated to include 0008 — SLM.md tables list: leads, companies, domains, users, sessions, keywords, domain_registrations
 
 ---
 

@@ -954,6 +954,175 @@ async function publishBatch(action) {
   toast(checked.length + ' domains processed');
 }
 
+// ── PORKBUN REGISTRY ─────────────────────────────────────────────────────────
+
+async function importAllDomains() {
+  const btn  = document.getElementById('btn-import-all');
+  const wrap = document.getElementById('sync-status-wrap');
+  if (btn)  { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  if (wrap) wrap.innerHTML = '<span style="color:var(--tx3)">Connecting to Porkbun — fetching all domains…</span>';
+  try {
+    const r = await fetch('/api/porkbun/import-all', { method: 'POST' });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    toast(`Imported ${d.total} domains — ${d.inserted} new, ${d.updated} updated`);
+    loadSyncStatus();
+    loadDomains();
+  } catch (e) {
+    toast('Import failed: ' + e.message, 'error');
+    if (wrap) wrap.innerHTML = `<span style="color:#f87171">Import error: ${e.message}</span>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Import All'; }
+  }
+}
+
+async function loadSyncStatus() {
+  const wrap = document.getElementById('sync-status-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<span style="color:var(--tx3)">Loading…</span>';
+  try {
+    const r = await fetch('/api/porkbun/sync-status');
+    const d = await r.json();
+    if (d.error) { wrap.innerHTML = `<span style="color:#f87171">${d.error}</span>`; return; }
+    const lastSync = d.last_sync ? new Date(d.last_sync).toLocaleString() : 'Never';
+    const unsyncedWarn = d.unsynced_domains.length > 0
+      ? `style="border-color:rgba(245,158,11,0.4);color:#F59E0B"` : '';
+    const expiryWarn = d.expiring_soon.length > 0
+      ? `style="border-color:rgba(239,68,68,0.4);color:#f87171"` : '';
+    wrap.innerHTML = `
+      <div style="display:flex;flex-wrap:wrap;margin-bottom:8px">
+        <span class="sync-stat">Porkbun: <span class="sync-val">${d.porkbun_total}</span></span>
+        <span class="sync-stat">D1 Domains: <span class="sync-val">${d.d1_total}</span></span>
+        <span class="sync-stat" ${unsyncedWarn}>Unsynced: <span class="sync-val">${d.unsynced_domains.length}</span></span>
+        <span class="sync-stat" ${expiryWarn}>Expiring ≤30d: <span class="sync-val">${d.expiring_soon.length}</span></span>
+      </div>
+      <div style="color:var(--tx3);font-size:11px">Last sync: ${lastSync}</div>
+    `;
+    if (d.expiring_soon.length > 0) renderExpiryAlerts(d.expiring_soon);
+    else document.getElementById('expiry-alerts-wrap').innerHTML = '';
+  } catch (e) {
+    wrap.innerHTML = `<span style="color:#f87171">Error: ${e.message}</span>`;
+  }
+}
+
+function _normSlug(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+async function searchDomains() {
+  const kw   = _normSlug(document.getElementById('dr-keyword')?.value);
+  const city = _normSlug(document.getElementById('dr-city')?.value);
+  if (!kw || !city) { toast('Enter keyword and city', 'error'); return; }
+  const exts = [];
+  if (document.getElementById('dr-ca')?.checked)  exts.push('ca');
+  if (document.getElementById('dr-com')?.checked) exts.push('com');
+  if (document.getElementById('dr-net')?.checked) exts.push('net');
+  if (!exts.length) { toast('Select at least one extension', 'error'); return; }
+
+  // Generate patterns: keyword+city, city+keyword, keyword+in+city
+  const patterns = [`${kw}${city}`, `${city}${kw}`, `${kw}in${city}`];
+  const domains = [];
+  for (const pat of patterns) for (const ext of exts) domains.push(`${pat}.${ext}`);
+
+  const status  = document.getElementById('dr-status');
+  const results = document.getElementById('dr-results');
+  results.innerHTML = '';
+
+  // Check one domain at a time — browser handles 11s rate-limit delay between calls
+  for (let i = 0; i < domains.length; i++) {
+    const dom = domains[i];
+    if (i > 0) {
+      for (let s = 11; s > 0; s--) {
+        if (status) status.textContent = `⏳ Rate limit — next check (${dom}) in ${s}s…`;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    if (status) status.textContent = `🔍 Checking ${dom}…`;
+    try {
+      const r = await fetch('/api/porkbun/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domains: [dom] })
+      });
+      const d = await r.json();
+      _renderDomainSearchResult(results, d.results?.[0] || { domain: dom, status: 'ERROR' });
+    } catch (e) {
+      _renderDomainSearchResult(results, { domain: dom, status: 'ERROR', error: e.message });
+    }
+  }
+  if (status) status.textContent = `✅ Done — ${domains.length} domains checked.`;
+}
+
+function _renderDomainSearchResult(container, res) {
+  const avail = res.response?.avail === 'yes';
+  const price = res.response?.price ? `$${res.response.price}/yr` : '';
+  const rowId = `dr-row-${res.domain.replace(/\./g, '-')}`;
+  const row   = document.createElement('div');
+  row.className = 'dr-result-row';
+  row.id = rowId;
+  row.innerHTML = `
+    <span class="dr-domain">${res.domain}</span>
+    ${res.status === 'SUCCESS'
+      ? avail
+        ? `<span class="dr-avail-yes">✅ Available</span>
+           <span class="dr-price">${price}</span>
+           <button class="dr-reg-btn" onclick="registerDomain('${res.domain}','${res.response?.price||''}')">Register →</button>`
+        : `<span class="dr-avail-no">❌ Taken</span>`
+      : `<span class="dr-avail-no">⚠ Check failed</span>
+         <span class="dr-price" style="color:var(--tx3);font-size:11px">${res.error||''}</span>`
+    }`;
+  container.appendChild(row);
+}
+
+async function registerDomain(domain, price) {
+  if (!confirm(`Register ${domain} for $${price}/yr?\n\nThis charges your Porkbun account.\nWHOIS privacy is automatic and free.`)) return;
+  const rowId = `dr-row-${domain.replace(/\./g, '-')}`;
+  const row   = document.getElementById(rowId);
+  if (row) row.innerHTML = `<span class="dr-domain">${domain}</span><span style="color:var(--tx3);font-size:12px">⏳ Registering…</span>`;
+  try {
+    const r = await fetch('/api/porkbun/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ domain, years: '1' })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+    const stepsHtml = (d.steps || []).map(s => `
+      <div class="dr-step dr-step-${s.status}">
+        ${s.status==='ok' ? '✅' : s.status==='error' ? '⚠' : '⏳'} <strong>${s.step.replace(/_/g,' ')}</strong>
+        ${s.detail ? `<span style="color:var(--tx3)">— ${s.detail}</span>` : ''}
+      </div>`).join('');
+    if (row) row.innerHTML = `
+      <div style="flex:1">
+        <div style="font-weight:700;color:#4ade80;margin-bottom:6px">✅ ${domain} registered!</div>
+        <div class="dr-steps">${stepsHtml}</div>
+      </div>`;
+    toast(`${domain} registered!`);
+    loadDomains();
+    loadSyncStatus();
+  } catch (e) {
+    if (row) row.innerHTML = `<span class="dr-domain">${domain}</span><span style="color:#f87171">❌ ${e.message}</span>`;
+    toast('Registration failed: ' + e.message, 'error');
+  }
+}
+
+function renderExpiryAlerts(alerts) {
+  const wrap = document.getElementById('expiry-alerts-wrap');
+  if (!wrap || !alerts.length) return;
+  wrap.innerHTML = `
+    <div class="card" style="margin-top:16px;border-color:rgba(245,158,11,0.35)">
+      <div class="card-hd"><div class="card-title" style="color:#F59E0B">⚠ Expiring Within 30 Days (${alerts.length})</div></div>
+      <div style="padding:12px 20px">
+        ${alerts.map(a => `
+          <div class="expiry-alert">
+            <span style="flex:1;font-weight:600;min-width:160px">${a.domain}</span>
+            <span class="expiry-badge">${a.days_left}d left</span>
+            <span style="color:var(--tx3)">${(a.expires_at||'').split('T')[0]}</span>
+            <span style="color:var(--tx3);font-size:11px">${a.company_name||'Unassigned'}</span>
+            <span style="font-size:11px;font-weight:600;color:${a.auto_renew?'#4ade80':'#f87171'}">${a.auto_renew?'Auto-renew ON':'⚠ Auto-renew OFF'}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 // ── TOAST ─────────────────────────────────────────────────────────────────
 
 let _toastTimer;
