@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>911 Marketing Hub — Ottawa EMD Army</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,sans-serif;background:#09090B;color:#fff;min-height:100vh}
+    a{color:inherit;text-decoration:none}
+
+    /* Header */
+    .header{background:#111;border-bottom:1px solid #222;padding:12px 24px;display:flex;align-items:center;justify-content:space-between}
+    .header-brand{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px}
+    .header-brand .logo{font-size:24px}
+    .header-sub{color:#71717A;font-size:12px;font-weight:400}
+    .header-links{display:flex;gap:12px;align-items:center}
+    .header-links a{color:#71717A;font-size:13px;padding:6px 12px;border-radius:6px;transition:background .15s}
+    .header-links a:hover{background:#1a1a1a;color:#fff}
+
+    /* Tabs */
+    .tabs{background:#111;border-bottom:1px solid #222;padding:0 24px;display:flex;gap:0;overflow-x:auto}
+    .tab{padding:12px 18px;font-size:13px;font-weight:600;color:#71717A;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .15s;background:none;border-top:none;border-left:none;border-right:none}
+    .tab:hover{color:#fff}
+    .tab.active{color:#fff;border-bottom-color:#CC0000}
+
+    /* Main */
+    .main{padding:24px;max-width:1400px;margin:0 auto}
+    .pane{display:none}
+    .pane.active{display:block}
+
+    /* Cards */
+    .card{background:#111;border:1px solid #222;border-radius:10px;padding:20px;margin-bottom:16px}
+    .card h3{font-size:14px;font-weight:700;color:#a1a1aa;text-transform:uppercase;letter-spacing:.05em;margin-bottom:12px}
+
+    /* Stats row */
+    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+    .stat{background:#111;border:1px solid #222;border-radius:10px;padding:16px;text-align:center}
+    .stat-num{font-size:28px;font-weight:900;color:#fff}
+    .stat-label{font-size:11px;color:#71717A;margin-top:4px;text-transform:uppercase;letter-spacing:.05em}
+    .stat-num.red{color:#CC0000}
+    .stat-num.amber{color:#F59E0B}
+    .stat-num.gold{color:#D97706}
+    .stat-num.green{color:#4ade80}
+
+    /* Table */
+    .table-wrap{overflow-x:auto;border-radius:10px;border:1px solid #222}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    thead th{background:#161616;padding:10px 14px;text-align:left;font-weight:700;color:#71717A;text-transform:uppercase;font-size:11px;letter-spacing:.05em;border-bottom:1px solid #222;white-space:nowrap}
+    tbody tr{border-bottom:1px solid #1a1a1a;transition:background .1s}
+    tbody tr:last-child{border-bottom:none}
+    tbody tr:hover{background:#141414}
+    tbody td{padding:10px 14px;vertical-align:middle}
+
+    /* Pills */
+    .pill{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em}
+    .pill-emergency{background:#3f0f0f;color:#f87171}
+    .pill-renovation{background:#1c1608;color:#F59E0B}
+    .pill-kitchen{background:#1a1206;color:#D97706}
+    .pill-active{background:#052e16;color:#4ade80}
+    .pill-building{background:#172554;color:#60a5fa}
+    .pill-parked{background:#1c1c1c;color:#71717A}
+
+    /* Priority colours */
+    td.p1{color:#f87171;font-weight:700}
+    td.p2{color:#F59E0B;font-weight:600}
+    td.p3{color:#60a5fa}
+    td.p4{color:#71717A}
+
+    /* Quick-fill buttons */
+    .qf{padding:3px 8px;border-radius:4px;font-size:11px;font-weight:700;border:none;cursor:pointer;margin-right:4px}
+    .qf-lp{background:#3f0f0f;color:#f87171}
+    .qf-lp:hover{background:#CC0000;color:#fff}
+    .qf-ads{background:#1c1608;color:#F59E0B}
+    .qf-ads:hover{background:#F59E0B;color:#000}
+
+    /* Filter tabs */
+    .filter-tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+    .filter-tab{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;background:#1a1a1a;color:#71717A;border:1px solid #2a2a2a;transition:all .15s}
+    .filter-tab:hover{color:#fff;border-color:#444}
+    .filter-tab.active{background:#CC0000;color:#fff;border-color:#CC0000}
+
+    /* Forms */
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+    .form-grid.cols3{grid-template-columns:1fr 1fr 1fr}
+    label{display:block;font-size:11px;font-weight:700;color:#71717A;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+    input[type=text],input[type=email],input[type=url],select,textarea{width:100%;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;padding:10px 12px;color:#fff;font-size:14px;font-family:inherit;outline:none;transition:border .15s}
+    input:focus,select:focus,textarea:focus{border-color:#555}
+    select option{background:#0d0d0d}
+    textarea{resize:vertical;min-height:80px}
+
+    /* Buttons */
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+    .btn{padding:10px 20px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
+    .btn-primary{background:#CC0000;color:#fff}
+    .btn-primary:hover{background:#aa0000}
+    .btn-secondary{background:#1a1a1a;color:#fff;border:1px solid #333}
+    .btn-secondary:hover{background:#222;border-color:#555}
+    .btn-amber{background:#F59E0B;color:#000}
+    .btn-amber:hover{background:#d97706}
+    .btn-green{background:#16a34a;color:#fff}
+    .btn-green:hover{background:#15803d}
+
+    /* Output / code */
+    .output-box{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:8px;padding:16px;font-family:'Courier New',monospace;font-size:12px;line-height:1.6;color:#a8ff78;min-height:160px;max-height:500px;overflow:auto;white-space:pre-wrap;word-break:break-all}
+    .output-html{color:#e2e8f0}
+
+    /* Lead rows */
+    .lead-row{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid #1a1a1a}
+    .lead-row:last-child{border-bottom:none}
+
+    /* Domain checklist */
+    .domain-check{display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:6px;cursor:pointer;transition:background .1s}
+    .domain-check:hover{background:#141414}
+    .domain-check input{margin-top:3px;accent-color:#CC0000;width:14px;height:14px}
+
+    /* Progress */
+    .progress-wrap{background:#1a1a1a;border-radius:6px;height:8px;overflow:hidden;margin-bottom:10px}
+    #pub-progress{height:100%;background:#CC0000;width:0%;transition:width .2s;border-radius:6px}
+    #publish-progress{display:none}
+    #pub-log{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:6px;padding:12px;font-family:'Courier New',monospace;font-size:12px;color:#71717A;height:200px;overflow-y:auto;white-space:pre-wrap;margin-top:10px}
+
+    /* OAuth status */
+    .oauth-row{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#0d0d0d;border:1px solid #222;border-radius:8px;margin-bottom:12px;font-size:13px}
+
+    /* Toast */
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#fff;color:#09090B;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:700;z-index:9999;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+    .toast.error{background:#CC0000;color:#fff}
+
+    /* Section header */
+    .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+    .section-header h2{font-size:18px;font-weight:800}
+
+    @media(max-width:640px){
+      .form-grid{grid-template-columns:1fr}
+      .stats{grid-template-columns:repeat(2,1fr)}
+      .main{padding:16px}
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-brand">
+    <span class="logo">🚨</span>
+    <div>
+      911 Marketing Hub
+      <div class="header-sub">Ottawa EMD Army Command Center — v2.0.0</div>
+    </div>
+  </div>
+  <div class="header-links">
+    <a href="/serviceleads">Google API Setup</a>
+    <a href="/api/status">API Status</a>
+    <a href="/">Home</a>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" onclick="showTab('domains',this)">🗺️ Domains</button>
+  <button class="tab" onclick="showTab('landing',this)">📄 Landing Pages</button>
+  <button class="tab" onclick="showTab('ads',this)">📢 Google Ads</button>
+  <button class="tab" onclick="showTab('seo',this)">🔍 SEO Content</button>
+  <button class="tab" onclick="showTab('publish',this)">🚀 Batch Publish</button>
+  <button class="tab" onclick="showTab('leads',this)">📋 Leads</button>
+  <button class="tab" onclick="showTab('dashboard',this)">📊 Dashboard</button>
+</div>
+
+<!-- Main -->
+<div class="main">
+
+  <!-- ── DOMAINS ── -->
+  <div class="pane active" id="pane-domains">
+    <div class="section-header">
+      <h2>Domain Army — 33 Ottawa EMDs</h2>
+    </div>
+    <div class="filter-tabs">
+      <button class="filter-tab active" onclick="filterDomains('all',this)">All</button>
+      <button class="filter-tab" onclick="filterDomains('emergency',this)">🚨 Restoration</button>
+      <button class="filter-tab" onclick="filterDomains('renovation',this)">🔨 Renovation</button>
+      <button class="filter-tab" onclick="filterDomains('kitchen',this)">🍳 Kitchen</button>
+      <button class="filter-tab" onclick="filterDomains('Active',this)">Active</button>
+      <button class="filter-tab" onclick="filterDomains('Building',this)">Building</button>
+      <button class="filter-tab" onclick="filterDomains('Parked',this)">Parked</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Domain</th>
+            <th>Keyword</th>
+            <th>Service</th>
+            <th>Company</th>
+            <th>Budget</th>
+            <th>Status</th>
+            <th>Priority</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="domains-tbody">
+          <tr><td colspan="8" style="text-align:center;color:#71717A;padding:24px">Loading domains…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── LANDING PAGE GENERATOR ── -->
+  <div class="pane" id="pane-landing">
+    <div class="section-header"><h2>Landing Page Generator</h2></div>
+    <div class="card">
+      <h3>Generate Landing Page HTML</h3>
+      <div class="form-grid">
+        <div>
+          <label>Domain</label>
+          <input type="text" id="lp-domain" placeholder="e.g. waterdamageottawa.ca">
+        </div>
+        <div>
+          <label>Keyword</label>
+          <input type="text" id="lp-keyword" placeholder="e.g. water damage ottawa">
+        </div>
+        <div>
+          <label>Service</label>
+          <input type="text" id="lp-service" placeholder="e.g. Water Damage Restoration">
+        </div>
+        <div>
+          <label>Company</label>
+          <select id="lp-company">
+            <option value="">Auto-detect</option>
+            <option value="Restoration">🚨 911 Restoration Ottawa</option>
+            <option value="Renovation">🔨 911 Renovation</option>
+            <option value="Kitchen">🍳 Ottawa Kitchen Cabinetry</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="generateLP()">⚡ Generate</button>
+        <button class="btn btn-secondary" onclick="copyLP()">📋 Copy HTML</button>
+        <button class="btn btn-secondary" onclick="previewLP()">👁️ Preview</button>
+        <button class="btn btn-green" onclick="deployLP()">🚀 Deploy</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Output</h3>
+      <div class="output-box output-html" id="lp-output">Generate a landing page to see the HTML here.</div>
+    </div>
+  </div>
+
+  <!-- ── GOOGLE ADS GENERATOR ── -->
+  <div class="pane" id="pane-ads">
+    <div class="section-header"><h2>Google Ads Campaign Generator</h2></div>
+    <div class="oauth-row">
+      <span style="color:#71717A;font-size:12px;font-weight:700;text-transform:uppercase">Google OAuth:</span>
+      <span id="oauth-status"><span style="color:#f87171">Not connected</span></span>
+      <a href="/api/auth/google" class="btn btn-secondary" style="padding:6px 14px;font-size:12px;margin-left:auto">Connect Google</a>
+      <button class="btn btn-secondary" style="padding:6px 14px;font-size:12px" onclick="checkGoogleAuth()">Refresh</button>
+    </div>
+    <div class="card">
+      <h3>Generate Campaign JSON</h3>
+      <div class="form-grid">
+        <div>
+          <label>Domain</label>
+          <input type="text" id="ads-domain" placeholder="e.g. waterdamageottawa.ca">
+        </div>
+        <div>
+          <label>Keyword</label>
+          <input type="text" id="ads-keyword" placeholder="e.g. water damage ottawa">
+        </div>
+        <div>
+          <label>Service</label>
+          <input type="text" id="ads-service" placeholder="e.g. Water Damage Restoration">
+        </div>
+        <div>
+          <label>Company</label>
+          <select id="ads-company">
+            <option value="">Auto-detect</option>
+            <option value="Restoration">🚨 911 Restoration Ottawa</option>
+            <option value="Renovation">🔨 911 Renovation</option>
+            <option value="Kitchen">🍳 Ottawa Kitchen Cabinetry</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="generateAds()">⚡ Generate</button>
+        <button class="btn btn-secondary" onclick="copyAds()">📋 Copy JSON</button>
+        <button class="btn btn-amber" onclick="pushAds(true)">🔍 Dry Run Push</button>
+        <button class="btn btn-green" onclick="pushAds(false)">🚀 Push to Google Ads</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Campaign Output</h3>
+      <div class="output-box" id="ads-output">Generate a campaign to see the JSON here.</div>
+    </div>
+    <div class="card">
+      <h3>Push History</h3>
+      <div id="push-history"><p style="color:#71717A;font-size:13px">No history yet.</p></div>
+    </div>
+  </div>
+
+  <!-- ── SEO CONTENT GENERATOR ── -->
+  <div class="pane" id="pane-seo">
+    <div class="section-header"><h2>SEO Content Generator</h2></div>
+    <div class="card">
+      <h3>Generate SEO Package</h3>
+      <div class="form-grid">
+        <div>
+          <label>Domain</label>
+          <input type="text" id="seo-domain" placeholder="e.g. moldremovalottawa.ca">
+        </div>
+        <div>
+          <label>Keyword</label>
+          <input type="text" id="seo-keyword" placeholder="e.g. mold removal ottawa">
+        </div>
+        <div>
+          <label>Service</label>
+          <input type="text" id="seo-service" placeholder="e.g. Mold Removal & Remediation">
+        </div>
+        <div>
+          <label>Company</label>
+          <select id="seo-company">
+            <option value="">Auto-detect</option>
+            <option value="Restoration">🚨 911 Restoration Ottawa</option>
+            <option value="Renovation">🔨 911 Renovation</option>
+            <option value="Kitchen">🍳 Ottawa Kitchen Cabinetry</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="generateSEO()">⚡ Generate</button>
+        <button class="btn btn-secondary" onclick="copySEO()">📋 Copy JSON</button>
+      </div>
+    </div>
+    <div id="seo-output"></div>
+  </div>
+
+  <!-- ── BATCH PUBLISH ── -->
+  <div class="pane" id="pane-publish">
+    <div class="section-header"><h2>Batch Publish</h2></div>
+    <div class="card">
+      <h3>Select Domains</h3>
+      <div class="btn-row" style="margin-bottom:14px;margin-top:0">
+        <button class="btn btn-secondary" onclick="selectAllDomains(true)">Select All</button>
+        <button class="btn btn-secondary" onclick="selectAllDomains(false)">Deselect All</button>
+      </div>
+      <div id="publish-domains" style="max-height:360px;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:4px"></div>
+    </div>
+    <div class="card">
+      <h3>Batch Actions</h3>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="publishBatch('lp')">📄 Generate LPs</button>
+        <button class="btn btn-amber" onclick="publishBatch('ads')">📢 Generate Ads</button>
+        <button class="btn btn-secondary" onclick="publishBatch('seo')">🔍 Generate SEO</button>
+        <button class="btn btn-green" onclick="publishBatch('deploy')">🚀 Deploy All</button>
+      </div>
+      <div id="publish-progress">
+        <div class="progress-wrap" style="margin-top:14px"><div id="pub-progress"></div></div>
+        <pre id="pub-log"></pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LEADS ── -->
+  <div class="pane" id="pane-leads">
+    <div class="section-header"><h2>Inbound Leads</h2></div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num green" id="leads-total">—</div>
+        <div class="stat-label">Total Leads</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num red" id="leads-restoration">—</div>
+        <div class="stat-label">Restoration</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num amber" id="leads-renovation">—</div>
+        <div class="stat-label">Renovation</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num gold" id="leads-kitchen">—</div>
+        <div class="stat-label">Kitchen</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Recent Leads</h3>
+      <div id="leads-list"><p style="color:#71717A;text-align:center;padding:24px">Loading leads…</p></div>
+    </div>
+  </div>
+
+  <!-- ── DASHBOARD ── -->
+  <div class="pane" id="pane-dashboard">
+    <div class="section-header"><h2>Dashboard</h2></div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num" style="color:#CC0000">33</div>
+        <div class="stat-label">Total Domains</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num green">17</div>
+        <div class="stat-label">Active</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" style="color:#60a5fa">11</div>
+        <div class="stat-label">Building</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" style="color:#71717A">5</div>
+        <div class="stat-label">Parked</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num green" id="dash-leads">—</div>
+        <div class="stat-label">Total Leads</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="card">
+        <h3>🚨 911 Restoration Ottawa</h3>
+        <p style="font-size:13px;color:#71717A;margin-top:8px;line-height:1.6">16 domains · (613) 909-9911<br>Target CPA: $65 · Budget: $35/day<br>IICRC Certified · 45-Min Response · 24/7</p>
+      </div>
+      <div class="card">
+        <h3>🔨 911 Renovation</h3>
+        <p style="font-size:13px;color:#71717A;margin-top:8px;line-height:1.6">4 domains · (613) 909-9911<br>Target CPA: $120 · Budget: $25/day<br>Licensed &amp; Insured · Free Estimates</p>
+      </div>
+      <div class="card">
+        <h3>🍳 Ottawa Kitchen Cabinetry</h3>
+        <p style="font-size:13px;color:#71717A;margin-top:8px;line-height:1.6">13 domains · (613) 800-5555<br>Target CPA: $95 · Budget: $25/day<br>Custom Cabinets · Factory Direct</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:0">
+      <h3>Priority Roadmap</h3>
+      <table style="font-size:13px;width:100%">
+        <thead><tr><th style="text-align:left;padding:6px 8px;color:#71717A;font-size:11px">Priority</th><th style="text-align:left;padding:6px 8px;color:#71717A;font-size:11px">Feature</th><th style="text-align:left;padding:6px 8px;color:#71717A;font-size:11px">Status</th></tr></thead>
+        <tbody>
+          <tr><td style="padding:6px 8px">🔴 P1</td><td style="padding:6px 8px">Real Google Ads API v18 push</td><td style="padding:6px 8px;color:#f87171">Needs credentials</td></tr>
+          <tr><td style="padding:6px 8px">🔴 P2</td><td style="padding:6px 8px">Domain deployment to Cloudflare Pages</td><td style="padding:6px 8px;color:#f87171">Needs CF API token</td></tr>
+          <tr><td style="padding:6px 8px">🟡 P3</td><td style="padding:6px 8px">Telegram lead notifications</td><td style="padding:6px 8px;color:#F59E0B">Needs bot token</td></tr>
+          <tr><td style="padding:6px 8px">🟡 P4</td><td style="padding:6px 8px">Meta Ads push</td><td style="padding:6px 8px;color:#F59E0B">Needs Meta access token</td></tr>
+          <tr><td style="padding:6px 8px">🟢 P5</td><td style="padding:6px 8px">Performance dashboard with real metrics</td><td style="padding:6px 8px;color:#4ade80">After P1</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<script src="/static/app.js"></script>
+<script>
+  // Init on load
+  loadDomains();
+  checkGoogleAuth();
+</script>
+</body>
+</html>

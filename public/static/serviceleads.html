@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Google API Setup — 911 Marketing Hub</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:system-ui,-apple-system,sans-serif;background:#09090B;color:#fff;min-height:100vh}
+
+    .header{background:#111;border-bottom:1px solid #222;padding:12px 24px;display:flex;align-items:center;justify-content:space-between}
+    .header-brand{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px}
+    .header-brand .logo{font-size:24px}
+    .header-sub{color:#71717A;font-size:12px;font-weight:400}
+    .header-links a{color:#71717A;font-size:13px;padding:6px 12px;border-radius:6px;text-decoration:none}
+    .header-links a:hover{background:#1a1a1a;color:#fff}
+
+    .main{max-width:860px;margin:0 auto;padding:32px 24px}
+
+    .page-title{font-size:26px;font-weight:900;margin-bottom:6px}
+    .page-sub{color:#71717A;font-size:14px;margin-bottom:32px}
+
+    .card{background:#111;border:1px solid #222;border-radius:10px;padding:24px;margin-bottom:20px}
+    .card-title{font-size:15px;font-weight:800;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+    .card-sub{color:#71717A;font-size:13px;margin-bottom:18px}
+
+    .step{display:flex;gap:16px;margin-bottom:20px}
+    .step:last-child{margin-bottom:0}
+    .step-num{width:28px;height:28px;border-radius:50%;background:#CC0000;color:#fff;font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+    .step-body{flex:1}
+    .step-title{font-size:14px;font-weight:700;margin-bottom:4px}
+    .step-desc{font-size:13px;color:#71717A;line-height:1.6}
+    .step-desc a{color:#60a5fa;text-decoration:underline}
+    .step-desc code{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;padding:1px 6px;font-family:'Courier New',monospace;font-size:12px;color:#a8ff78}
+
+    label{display:block;font-size:11px;font-weight:700;color:#71717A;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+    input[type=text],input[type=password]{width:100%;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:6px;padding:10px 12px;color:#fff;font-size:14px;font-family:inherit;outline:none;transition:border .15s;margin-bottom:12px}
+    input:focus{border-color:#555}
+
+    .btn{padding:10px 20px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;border:none;transition:all .15s;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+    .btn-primary{background:#CC0000;color:#fff}
+    .btn-primary:hover{background:#aa0000}
+    .btn-secondary{background:#1a1a1a;color:#fff;border:1px solid #333}
+    .btn-secondary:hover{background:#222;border-color:#555}
+    .btn-google{background:#4285F4;color:#fff}
+    .btn-google:hover{background:#357ae8}
+
+    .status-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700}
+    .badge-red{background:#3f0f0f;color:#f87171}
+    .badge-green{background:#052e16;color:#4ade80}
+    .badge-amber{background:#1c1608;color:#F59E0B}
+
+    .code-block{background:#0a0a0a;border:1px solid #1a1a1a;border-radius:6px;padding:14px 16px;font-family:'Courier New',monospace;font-size:12px;color:#a8ff78;line-height:1.8;margin-top:8px;overflow-x:auto;white-space:pre}
+
+    .oauth-status-box{background:#0d0d0d;border:1px solid #222;border-radius:8px;padding:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+
+    .divider{border:none;border-top:1px solid #1a1a1a;margin:20px 0}
+
+    .env-table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}
+    .env-table th{text-align:left;padding:8px 12px;background:#161616;color:#71717A;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #222}
+    .env-table td{padding:8px 12px;border-bottom:1px solid #1a1a1a;vertical-align:top}
+    .env-table tr:last-child td{border-bottom:none}
+    .env-table code{color:#a8ff78;font-family:'Courier New',monospace;font-size:12px}
+    .env-table .req{color:#f87171;font-size:11px;font-weight:700}
+    .env-table .opt{color:#71717A;font-size:11px}
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-brand">
+    <span class="logo">🚨</span>
+    <div>
+      911 Marketing Hub
+      <div class="header-sub">Google API Setup</div>
+    </div>
+  </div>
+  <div class="header-links">
+    <a href="/app">← Back to Hub</a>
+    <a href="/api/status">API Status</a>
+  </div>
+</div>
+
+<div class="main">
+  <div class="page-title">Google API Setup</div>
+  <p class="page-sub">Configure Google Ads API v18 OAuth 2.0 credentials to enable live campaign push from the Marketing Hub.</p>
+
+  <!-- OAuth Status -->
+  <div class="card">
+    <div class="card-title">🔌 Connection Status</div>
+    <div class="card-sub">Current Google Ads OAuth connection status</div>
+    <div class="oauth-status-box">
+      <div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px">Google Ads OAuth</div>
+        <div id="oauth-status-text"><span class="status-badge badge-amber">Checking…</span></div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <a href="/api/auth/google" class="btn btn-google">Connect Google Account</a>
+        <button class="btn btn-secondary" onclick="checkStatus()">Refresh</button>
+      </div>
+    </div>
+    <div id="oauth-detail" style="font-size:12px;color:#71717A"></div>
+  </div>
+
+  <!-- Step-by-step setup -->
+  <div class="card">
+    <div class="card-title">📋 Setup Guide — Google Ads API v18</div>
+    <div class="card-sub">Follow these steps to get your credentials and enable live campaign push.</div>
+
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">Create a Google Cloud Project</div>
+        <div class="step-desc">
+          Go to <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a>, create a new project (e.g. <code>911-marketing-hub</code>), and enable the <strong>Google Ads API</strong> under APIs &amp; Services → Library.
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">Create OAuth 2.0 Credentials</div>
+        <div class="step-desc">
+          APIs &amp; Services → Credentials → Create Credentials → OAuth Client ID.<br>
+          Application type: <strong>Web application</strong>.<br>
+          Add authorized redirect URI:
+          <div class="code-block">https://services-leads-marketing-hub.pages.dev/api/auth/google/callback</div>
+          Save your <code>Client ID</code> and <code>Client Secret</code>.
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">Apply for Google Ads API Access</div>
+        <div class="step-desc">
+          Go to <a href="https://ads.google.com/home/tools/manager-accounts/" target="_blank">Google Ads Manager</a> → Tools → API Center.<br>
+          Apply for a <strong>Developer Token</strong>. Start with Basic access (test account). You'll receive a token like <code>ABcdEf1234567890</code>.
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <div class="step-title">Add Environment Variables to Cloudflare</div>
+        <div class="step-desc">
+          In Cloudflare Pages → Settings → Environment Variables, add:
+          <div class="code-block">GOOGLE_ADS_DEVELOPER_TOKEN  = your-developer-token
+GOOGLE_ADS_CLIENT_ID        = your-client-id.apps.googleusercontent.com
+GOOGLE_ADS_CLIENT_SECRET    = your-client-secret
+GOOGLE_ADS_CUSTOMER_ID      = your-ads-account-id (digits only)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <div class="step-title">Authorize via OAuth</div>
+        <div class="step-desc">
+          After deploying with the env vars set, click <strong>Connect Google Account</strong> above. This starts the OAuth 2.0 flow and stores refresh tokens in your KV namespace for future API calls.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Environment Variables Reference -->
+  <div class="card">
+    <div class="card-title">🔧 All Environment Variables</div>
+    <div class="card-sub">Set these in Cloudflare Pages → Settings → Environment Variables (Production)</div>
+    <table class="env-table">
+      <thead>
+        <tr><th>Variable</th><th>Description</th><th>Required</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>GOOGLE_ADS_DEVELOPER_TOKEN</code></td><td>From Google Ads Manager API Center</td><td><span class="req">Required</span></td></tr>
+        <tr><td><code>GOOGLE_ADS_CLIENT_ID</code></td><td>OAuth 2.0 Client ID from Google Cloud Console</td><td><span class="req">Required</span></td></tr>
+        <tr><td><code>GOOGLE_ADS_CLIENT_SECRET</code></td><td>OAuth 2.0 Client Secret</td><td><span class="req">Required</span></td></tr>
+        <tr><td><code>GOOGLE_ADS_CUSTOMER_ID</code></td><td>Google Ads account ID (numbers only, no dashes)</td><td><span class="req">Required</span></td></tr>
+        <tr><td><code>CLOUDFLARE_API_TOKEN</code></td><td>For deploying landing pages to Cloudflare Pages</td><td><span class="opt">Optional</span></td></tr>
+        <tr><td><code>CLOUDFLARE_ACCOUNT_ID</code></td><td>Your Cloudflare account ID</td><td><span class="opt">Optional</span></td></tr>
+        <tr><td><code>TELEGRAM_BOT_TOKEN</code></td><td>Telegram bot token for lead notifications</td><td><span class="opt">Optional</span></td></tr>
+        <tr><td><code>TELEGRAM_CHAT_ID</code></td><td>Telegram chat/channel ID for notifications</td><td><span class="opt">Optional</span></td></tr>
+        <tr><td><code>META_ACCESS_TOKEN</code></td><td>Meta (Facebook) access token for Meta Ads push</td><td><span class="opt">Optional</span></td></tr>
+        <tr><td><code>META_AD_ACCOUNT_ID</code></td><td>Meta ad account ID</td><td><span class="opt">Optional</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Cloudflare Bindings -->
+  <div class="card">
+    <div class="card-title">☁️ Cloudflare Bindings (Already Configured)</div>
+    <div class="card-sub">These are set in wrangler.jsonc and bound to this deployment.</div>
+    <div class="code-block">KV Namespace : KV  →  40cccfe0b3734c3a8c16300e3300e6aa
+D1 Database  : DB  →  911-marketing-hub-production (04f5ae3a-2273-49e5-8927-e7dcfa0afac1)</div>
+  </div>
+</div>
+
+<script>
+async function checkStatus() {
+  try {
+    const r = await fetch('/api/auth/google/status');
+    const d = await r.json();
+    const el = document.getElementById('oauth-status-text');
+    const detail = document.getElementById('oauth-detail');
+    if (d.connected) {
+      el.innerHTML = '<span class="status-badge badge-green">Connected</span>';
+      detail.textContent = 'Token expires in ~' + Math.round(d.expires_in_seconds / 60) + ' minutes. Refresh token: ' + (d.has_refresh ? 'present' : 'missing');
+    } else {
+      el.innerHTML = '<span class="status-badge badge-red">Not Connected</span>';
+      detail.textContent = d.message || 'Click "Connect Google Account" to authorize.';
+    }
+  } catch(e) {
+    document.getElementById('oauth-status-text').innerHTML = '<span class="status-badge badge-amber">Error checking status</span>';
+  }
+}
+checkStatus();
+</script>
+</body>
+</html>

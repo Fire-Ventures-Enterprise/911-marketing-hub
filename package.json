@@ -1,0 +1,24 @@
+{
+  "name": "911-marketing-hub",
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node build-inline.js && vite",
+    "build": "node build-inline.js && vite build",
+    "preview": "wrangler pages dev",
+    "deploy": "npm run build && wrangler pages deploy",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "start": "pm2 start ecosystem.config.cjs",
+    "restart": "pm2 restart 911-marketing-hub"
+  },
+  "dependencies": {
+    "hono": "^4.12.4"
+  },
+  "devDependencies": {
+    "@hono/vite-build": "^1.2.0",
+    "@hono/vite-cloudflare-pages": "^0.4.3",
+    "@hono/vite-dev-server": "^0.18.2",
+    "vite": "^6.3.5",
+    "wrangler": "^4.4.0"
+  }
+}

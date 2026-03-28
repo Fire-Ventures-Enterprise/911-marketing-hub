@@ -1,0 +1,17 @@
+{
+  "name": "services-leads-marketing-hub",
+  "pages_build_output_dir": "dist",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "911-marketing-hub-production",
+      "database_id": "04f5ae3a-2273-49e5-8927-e7dcfa0afac1"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "40cccfe0b3734c3a8c16300e3300e6aa"
+    }
+  ]
+}

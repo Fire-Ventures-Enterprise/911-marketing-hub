@@ -1,0 +1,11 @@
+/* 911 Marketing Hub — Static styles */
+:root {
+  --red: #CC0000;
+  --amber: #F59E0B;
+  --gold: #D97706;
+  --bg: #09090B;
+  --surface: #111;
+  --border: #222;
+  --text: #fff;
+  --muted: #888;
+}
