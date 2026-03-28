@@ -658,6 +658,17 @@ app.onError((err, c) => {
   console.error('[SLM Error]', err.message, err.stack)
   return c.json({ error: 'Internal server error', detail: err.message }, 500)
 })
+
+// slmhub.com → slmhub.ca — 301 permanent redirect (must run before all other middleware)
+app.use('*', async (c, next) => {
+  const host = c.req.header('host') || ''
+  if (host === 'slmhub.com' || host === 'www.slmhub.com') {
+    const url = new URL(c.req.url)
+    url.hostname = 'slmhub.ca'
+    return c.redirect(url.toString(), 301)
+  }
+  return next()
+})
 app.use('/api/*', cors({ origin: '*', allowMethods: ['POST', 'GET', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }))
 app.use('/api/*', async (c, next) => {
   const key = `${c.req.method} ${new URL(c.req.url).pathname}`

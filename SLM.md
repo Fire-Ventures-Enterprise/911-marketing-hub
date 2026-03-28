@@ -3,7 +3,9 @@
 ## PROJECT
 **Name:** Services Leads Marketing Hub
 **Owner:** Fire Ventures Enterprise — Nasser Oweis (Super Admin / God Mode)
-**Live URL:** https://services-leads-marketing-hub.pages.dev
+**Primary URL:** https://slmhub.ca
+**Redirect:** https://slmhub.com → https://slmhub.ca (301 permanent)
+**Fallback URL:** https://services-leads-marketing-hub.pages.dev
 **Version:** 2.0.0
 
 ---
@@ -37,6 +39,9 @@
 ### Cloudflare Pages
 - **Project name:** `services-leads-marketing-hub` (must be lowercase — Cloudflare requirement)
 - **Output dir:** `dist` (`pages_build_output_dir` in `wrangler.jsonc`)
+- **Primary domain:** `slmhub.ca` (CF domain ID: `55a8cd2c-e2fd-4f0c-be9b-70aebc1270e9`)
+- **Redirect domain:** `slmhub.com` (CF domain ID: `53474f8c-6807-4775-b08a-0a42af0067cd`) → 301 to `slmhub.ca`
+- **Fallback:** `services-leads-marketing-hub.pages.dev` (always active)
 
 ---
 
@@ -159,6 +164,11 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Porkbun `checkDomain` response fields: `response.avail` ("yes"/"no"), `response.price` (promo reg price), `response.regularPrice`, `response.additional.renewal.price`, `response.additional.transfer.price`
 - Porkbun Pages secrets confirmed working after redeploy — secrets only take effect on next Pages deployment, not immediately after `wrangler pages secret put`
 - **Domain availability results (2026-03-28):** `basementfloodedottawa.ca` → AVAILABLE $8.88/yr | `waterdamageottawa.ca` → AVAILABLE $8.88/yr | `kitchencabinetsottawa.ca` → TAKEN (unavailable)
+- **Platform brand domains:** `slmhub.ca` (primary) + `slmhub.com` (301 redirect) — purchased on Porkbun, added as custom domains via Cloudflare Pages API (`POST /accounts/{id}/pages/projects/{project}/domains`)
+- Cloudflare Pages has no `wrangler.jsonc` field for custom domains — they must be added via CF API or Dashboard; document domain IDs in `wrangler.jsonc` comments
+- Custom domain activation requires DNS at Porkbun: `CNAME @ → services-leads-marketing-hub.pages.dev` for each domain; Cloudflare validates via HTTP challenge once DNS propagates
+- slmhub.com → slmhub.ca redirect is handled by Hono middleware (host header check, 301) so it works regardless of DNS/CF routing
+- Google OAuth redirect URI updated from `services-leads-marketing-hub.pages.dev` to `slmhub.ca` in `serviceleads.html` — update the authorized URI in Google Cloud Console to match
 
 ---
 
