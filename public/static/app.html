@@ -567,8 +567,10 @@
           <a href="/serviceleads" class="tb-link">Google API</a>
           <a href="/api/status" class="tb-link" target="_blank">API Status</a>
         </div>
-        <span class="role-badge">super_admin</span>
+        <span id="user-name" style="font-size:12px;color:var(--tx3)"></span>
+        <span id="role-badge" class="role-badge"></span>
         <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">☀️</button>
+        <button class="theme-btn" onclick="logout()" title="Sign out" style="font-size:12px;width:auto;padding:0 10px">↩</button>
       </div>
     </header>
 
@@ -749,9 +751,11 @@
 <script src="/static/app.js"></script>
 <script>
   initTheme();
-  loadDomains();
-  loadCompanies();
-  checkGoogleAuth();
+  checkAuth().then(() => {
+    loadDomains();
+    loadCompanies();
+    checkGoogleAuth();
+  });
 </script>
 </body>
 </html>

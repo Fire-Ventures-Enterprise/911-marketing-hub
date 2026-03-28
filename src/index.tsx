@@ -1,9 +1,11 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
-import { APP_HTML, SERVICE_LEADS_HTML } from './pages'
+import { APP_HTML, SERVICE_LEADS_HTML, LOGIN_HTML } from './pages'
 
 type Bindings = { KV: KVNamespace; DB: D1Database }
+type User = { id: string; email: string; role: string; company_id: number | null; name: string; company_key: string | null }
+type Variables = { user: User }
 
 const COMPANIES: Record<string, any> = {
   Restoration: {
@@ -147,8 +149,48 @@ function generateSeoContent(domain: string, keyword: string, service: string, co
   }
 }
 
-const app = new Hono<{ Bindings: Bindings }>()
+// ── AUTH HELPERS ─────────────────────────────────────────────────────────
+
+async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [, saltHex, storedHash] = stored.split(':')
+  if (!saltHex || !storedHash) return false
+  const enc = new TextEncoder()
+  const salt = new Uint8Array(saltHex.match(/.{2}/g)!.map((b: string) => parseInt(b, 16)))
+  const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, key, 256)
+  const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('')
+  return hashHex === storedHash
+}
+
+function getToken(c: any): string | null {
+  const auth = c.req.header('Authorization')
+  if (auth?.startsWith('Bearer ')) return auth.slice(7)
+  const cookie = c.req.header('Cookie') || ''
+  const match = cookie.match(/slm_token=([^;]+)/)
+  return match ? match[1] : null
+}
+
+const SKIP_AUTH = new Set([
+  'POST /api/leads', 'GET /api/status',
+  'POST /api/auth/login', 'POST /api/auth/logout',
+  'GET /api/auth/google', 'GET /api/auth/google/callback', 'GET /api/auth/google/status'
+])
+
+const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
 app.use('/api/*', cors({ origin: '*', allowMethods: ['POST', 'GET', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }))
+app.use('/api/*', async (c, next) => {
+  const key = `${c.req.method} ${new URL(c.req.url).pathname}`
+  if (SKIP_AUTH.has(key)) return next()
+  if (!c.env?.DB) return next()
+  const token = getToken(c)
+  if (!token) return c.json({ error: 'Unauthorized' }, 401)
+  const session = await c.env.DB.prepare(
+    'SELECT s.token as tok, u.id, u.email, u.role, u.company_id, u.name, u.active, co.key as company_key FROM sessions s JOIN users u ON s.user_id = u.id LEFT JOIN companies co ON u.company_id = co.id WHERE s.token = ? AND s.expires_at > ?'
+  ).bind(token, new Date().toISOString()).first() as any
+  if (!session || !session.active) return c.json({ error: 'Unauthorized' }, 401)
+  c.set('user', { id: session.id, email: session.email, role: session.role, company_id: session.company_id, name: session.name, company_key: session.company_key })
+  return next()
+})
 app.use('/static/*', serveStatic({ root: './' }))
 app.get('/favicon.ico', (c) => c.body(null, 204))
 app.get('/robots.txt', (c) => c.text('User-agent: *\nDisallow: /api/\n'))
@@ -164,19 +206,28 @@ app.get('/api/status', (c) => {
 })
 
 app.get('/api/domains', (c) => {
-  const all = [
+  const user = c.get('user')
+  let all = [
     ...DOMAINS.emergency.map(d => ({ ...d, category: 'emergency' })),
     ...DOMAINS.renovation.map(d => ({ ...d, category: 'renovation' })),
     ...DOMAINS.kitchen.map(d => ({ ...d, category: 'kitchen' }))
   ]
+  if (user && user.role !== 'super_admin' && user.company_key) {
+    all = all.filter(d => d.co === user.company_key)
+  }
   return c.json({ total: all.length, domains: all })
 })
 
 app.get('/api/companies', async (c) => {
   if (!c.env?.DB) return c.json({ companies: [] })
-  const result = await c.env.DB.prepare(
-    'SELECT id, key, name, phone, domain, budget, target_cpa, color_bg, color_accent, callouts, sitelinks FROM companies ORDER BY id'
-  ).all()
+  const user = c.get('user')
+  let query = 'SELECT id, key, name, phone, domain, budget, target_cpa, color_bg, color_accent, callouts, sitelinks FROM companies'
+  let result
+  if (user && user.role !== 'super_admin' && user.company_id !== null) {
+    result = await c.env.DB.prepare(query + ' WHERE id = ? ORDER BY id').bind(user.company_id).all()
+  } else {
+    result = await c.env.DB.prepare(query + ' ORDER BY id').all()
+  }
   return c.json({ companies: result.results || [] })
 })
 
@@ -213,8 +264,47 @@ app.post('/api/leads', async (c) => {
 
 app.get('/api/leads', async (c) => {
   if (!c.env?.DB) return c.json({ leads: [], message: 'DB not configured — running in demo mode' })
-  const result = await c.env.DB.prepare('SELECT * FROM leads ORDER BY timestamp DESC LIMIT 100').all()
+  const user = c.get('user')
+  let result
+  if (user && user.role !== 'super_admin' && user.company_key) {
+    result = await c.env.DB.prepare('SELECT * FROM leads WHERE company = ? ORDER BY timestamp DESC LIMIT 100').bind(user.company_key).all()
+  } else {
+    result = await c.env.DB.prepare('SELECT * FROM leads ORDER BY timestamp DESC LIMIT 100').all()
+  }
   return c.json({ leads: result.results || [], total: result.results?.length || 0 })
+})
+
+// ── SLM AUTH ──────────────────────────────────────────────────────────────
+
+app.post('/api/auth/login', async (c) => {
+  const { email, password } = await c.req.json()
+  if (!email || !password) return c.json({ error: 'Email and password required' }, 400)
+  if (!c.env?.DB) return c.json({ error: 'Database not configured' }, 500)
+  const user = await c.env.DB.prepare('SELECT * FROM users WHERE email = ? AND active = 1').bind(email.toLowerCase().trim()).first() as any
+  if (!user) return c.json({ error: 'Invalid credentials' }, 401)
+  const valid = await verifyPassword(password, user.password_hash)
+  if (!valid) return c.json({ error: 'Invalid credentials' }, 401)
+  const sessionId = crypto.randomUUID()
+  const token = crypto.randomUUID()
+  const now = new Date().toISOString()
+  const expiresAt = new Date(Date.now() + 86400000).toISOString()
+  await c.env.DB.prepare('INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)').bind(sessionId, user.id, token, expiresAt, now).run()
+  await c.env.DB.prepare('UPDATE users SET last_login = ? WHERE id = ?').bind(now, user.id).run()
+  c.header('Set-Cookie', `slm_token=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`)
+  return c.json({ success: true, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id, name: user.name } })
+})
+
+app.post('/api/auth/logout', async (c) => {
+  const token = getToken(c)
+  if (token && c.env?.DB) await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run()
+  c.header('Set-Cookie', 'slm_token=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0')
+  return c.json({ success: true })
+})
+
+app.get('/api/auth/me', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  return c.json({ user })
 })
 
 app.get('/api/auth/google', (c) => {
@@ -269,7 +359,12 @@ app.post('/api/deploy/landing-page', async (c) => {
 
 app.get('/', (c) => c.html('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>911 Marketing Hub</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#09090B;color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px}.logo{font-size:60px;margin-bottom:16px}h1{font-size:36px;font-weight:900;margin-bottom:8px}.sub{color:#71717A;margin-bottom:40px}.nav{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}.btn{background:#1A1A2E;border:1px solid #333;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:700}.btn.primary{background:#CC0000;border-color:#CC0000}</style></head><body><div class="logo">🚨</div><h1>911 Marketing Hub</h1><p class="sub">Ottawa EMD Army Command Center — v2.0.0</p><div class="nav"><a href="/app" class="btn primary">Marketing Hub</a><a href="/serviceleads" class="btn">Google API Setup</a><a href="/api/status" class="btn">API Status</a></div></body></html>'))
 
-app.get('/app', (c) => c.html(APP_HTML))
+app.get('/login', (c) => c.html(LOGIN_HTML))
+app.get('/app', (c) => {
+  const token = getToken(c)
+  if (!token) return c.redirect('/login')
+  return c.html(APP_HTML)
+})
 app.get('/serviceleads', (c) => c.html(SERVICE_LEADS_HTML))
 
 export default app

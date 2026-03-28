@@ -3,12 +3,14 @@ import { resolve } from 'path'
 
 const appHtmlPath = resolve('public/static/app.html')
 const serviceLeadsHtmlPath = resolve('public/static/serviceleads.html')
+const loginHtmlPath = resolve('public/static/login.html')
 const appJsPath = resolve('public/static/app.js')
 
 // Check files exist
 const warnings = []
 if (!existsSync(appHtmlPath)) warnings.push('⚠️  public/static/app.html not found')
 if (!existsSync(serviceLeadsHtmlPath)) warnings.push('⚠️  public/static/serviceleads.html not found')
+if (!existsSync(loginHtmlPath)) warnings.push('⚠️  public/static/login.html not found')
 if (!existsSync(appJsPath)) warnings.push('⚠️  public/static/app.js not found')
 
 if (warnings.length) {
@@ -23,6 +25,7 @@ const read = (path) => {
 
 const appHtml = read(appHtmlPath)
 const serviceLeadsHtml = read(serviceLeadsHtmlPath)
+const loginHtml = read(loginHtmlPath)
 const appJs = read(appJsPath)
 
 const output = `// AUTO-GENERATED — do not edit manually
@@ -31,6 +34,8 @@ const output = `// AUTO-GENERATED — do not edit manually
 export const APP_HTML = ${JSON.stringify(appHtml)}
 
 export const SERVICE_LEADS_HTML = ${JSON.stringify(serviceLeadsHtml)}
+
+export const LOGIN_HTML = ${JSON.stringify(loginHtml)}
 
 export const APP_JS = ${JSON.stringify(appJs)}
 `

@@ -7,6 +7,39 @@ let lastLpHtml       = '';
 let lastAdsCampaign  = null;
 let lastSeoContent   = null;
 
+// ── AUTH ──────────────────────────────────────────────────────────────────
+
+const ROLE_COLORS = {
+  super_admin:   { bg: 'rgba(217,119,6,0.15)',   color: '#D97706', border: 'rgba(217,119,6,0.3)' },
+  company_admin: { bg: 'rgba(96,165,250,0.12)',  color: '#60a5fa', border: 'rgba(96,165,250,0.25)' },
+  manager:       { bg: 'rgba(74,222,128,0.12)',  color: '#4ade80', border: 'rgba(74,222,128,0.25)' },
+  staff:         { bg: 'rgba(148,163,184,0.12)', color: '#94a3b8', border: 'rgba(148,163,184,0.25)' }
+};
+
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/auth/me');
+    if (r.status === 401) { window.location.replace('/login'); return Promise.reject(); }
+    const { user } = await r.json();
+    if (!user) { window.location.replace('/login'); return Promise.reject(); }
+    const badge  = document.getElementById('role-badge');
+    const nameEl = document.getElementById('user-name');
+    if (badge) {
+      badge.textContent = user.role;
+      const c = ROLE_COLORS[user.role] || ROLE_COLORS.staff;
+      badge.style.cssText = `background:${c.bg};color:${c.color};border-color:${c.border}`;
+    }
+    if (nameEl) nameEl.textContent = user.name || user.email;
+  } catch (e) {
+    if (e) window.location.replace('/login');
+  }
+}
+
+async function logout() {
+  await fetch('/api/auth/logout', { method: 'POST' });
+  window.location.replace('/login');
+}
+
 // ── THEME ─────────────────────────────────────────────────────────────────
 
 function initTheme() {
