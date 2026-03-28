@@ -63,6 +63,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0002_seed.sql` | Creates `companies` + `domains` tables, seeds all 3 companies and 33 domains |
 | `migrations/0003_auth.sql` | Creates `users` + `sessions` tables; seeds super admin Nasser Oweis |
 | `migrations/0004_domain_auth.sql` | Adds `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` to `domains`; pre-authorizes all 33 existing domains |
+| `migrations/0005_domain_auth_correction.sql` | Corrects 0004: resets Building and Parked domains to `authorized = 0`; only Active domains remain authorized |
 
 ---
 
@@ -105,6 +106,8 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - `GET /api/domains` was reading from a hardcoded in-memory object, not D1 — this is a bug; always read domain data from D1 so authorization and other DB-backed fields are returned correctly
 - D1 `domains` table uses `company` as the column name; the frontend uses `d.co` — alias with `company AS co` in SQL to avoid rewriting all frontend references
 - Domain authorization: `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` columns added via `ALTER TABLE` in migration `0004_domain_auth.sql`; pre-authorize all existing rows with `UPDATE domains SET authorized = 1 ...` in the same migration
+- Pre-authorization logic: only `Active` domains should be authorized on migration; `Building` and `Parked` domains stay at `authorized = 0` until the tenant explicitly approves — `0004` mistakenly authorized all 33, corrected by `0005_domain_auth_correction.sql` which resets `WHERE status IN ('Building', 'Parked')`
+- D1 authorization state after 0005: Active=16 authorized=1, Building=12 authorized=0, Parked=5 authorized=0 (total 33 domains)
 
 ---
 
