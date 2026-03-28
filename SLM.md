@@ -129,3 +129,17 @@ Every piece of content generated must follow this linking structure:
 - Never link to competitors under any circumstance
 - External links signal research, trust, and authority to Google
 - Pages with zero outbound links look untrustworthy to search engines
+
+---
+
+## SLM.md MAINTENANCE RULE
+
+SLM.md is a living document. It must be updated every single session without exception. After every build, fix, or feature added, Claude Code must:
+
+1. Add any new lessons learned to the LESSONS LEARNED section
+2. Update any changed infrastructure details (URLs, IDs, bindings)
+3. Add any new architectural decisions made during the session
+4. Add any bugs found and how they were fixed
+5. Commit the updated SLM.md with every push — never push code without also pushing an updated SLM.md
+
+If SLM.md is not updated, the next session starts blind. An outdated SLM.md is a failed session regardless of what code was written. Treat SLM.md like a captain's log — every session gets an entry, every decision gets recorded.
