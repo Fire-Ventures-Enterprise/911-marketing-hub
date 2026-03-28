@@ -140,6 +140,21 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - CSS custom properties in generated LP: `:root { --bg: ${bg}; --ac: ${accent}; }` — single substitution drives all colors throughout the page
 - D1 `companies` table `callouts` and `sitelinks` columns store JSON arrays — always parse with `JSON.parse(row.callouts || '[]')` to avoid runtime errors on null/empty values
 - In-memory COMPANIES fallback: use `(c2 as any).colors?.bg` — TypeScript type may not include `colors` sub-object; cast to `any` to avoid compile errors in fallback path
+- **Registrar: Porkbun API v3 exclusively** — no Namecheap, no other registrar; all domains owned by Fire Ventures Enterprise
+- Porkbun base URL: `https://api.porkbun.com/api/json/v3`
+- Porkbun auth: `apikey` + `secretapikey` sent in every request body (not headers)
+- Porkbun secrets stored as Cloudflare encrypted secrets: `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY` — set via `wrangler secret put`; empty placeholder strings in `wrangler.jsonc` `vars` block for local dev awareness only
+- Porkbun ping endpoint: `POST /api/json/v3/ping` — returns `{ status: "SUCCESS", yourIp: "..." }` on valid credentials
+- Porkbun domain availability: `POST /api/json/v3/domain/checkDomain/{domain}` — returns availability status and pricing
+- Porkbun domain registration: `POST /api/json/v3/domain/create/{domain}` — body requires `cost` (in pennies) and `agreeToTerms: "yes"`
+- WHOIS privacy on Porkbun is automatic and free — no extra flag needed
+- Worker routes: `GET /api/porkbun/ping` (super_admin only), `POST /api/porkbun/check` body `{ domains: [...] }` (super_admin only)
+- `porkbunPost(env, path, extra)` helper centralises auth injection — never spread api keys inline across routes
+- `Bindings` type must include `PORKBUN_API_KEY: string` and `PORKBUN_SECRET_KEY: string` for TypeScript to compile Worker routes that read those env vars
+- **Critical: Pages secrets ≠ Workers secrets** — `wrangler secret put` sets a secret for a *Worker*; for a Pages project you must use `wrangler pages secret put <KEY> --project-name <project>` — without this the secret is invisible to the Pages Function and `env.PORKBUN_API_KEY` is `undefined`
+- Pages secrets must be set separately for production and preview environments if needed
+- `wrangler pages secret list --project-name <project>` confirms what is actually visible to the Pages Function; check this first when a secret appears missing
+- Never put real API keys in `wrangler.jsonc` vars — Cloudflare rejects it if a secret with the same name already exists (binding name collision); use comments in wrangler.jsonc to document that secrets exist, not vars
 
 ---
 

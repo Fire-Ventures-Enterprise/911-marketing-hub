@@ -14,5 +14,8 @@
       "binding": "KV",
       "id": "40cccfe0b3734c3a8c16300e3300e6aa"
     }
-  ]
+  ],
+  // Porkbun API v3 credentials are stored as Cloudflare encrypted secrets.
+  // Set via: wrangler secret put PORKBUN_API_KEY  /  wrangler secret put PORKBUN_SECRET_KEY
+  // Do NOT add them to vars — Cloudflare rejects duplicate binding names across secrets + vars.
 }

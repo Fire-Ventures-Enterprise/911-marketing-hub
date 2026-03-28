@@ -3,7 +3,12 @@ import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
 import { APP_HTML, SERVICE_LEADS_HTML, LOGIN_HTML } from './pages'
 
-type Bindings = { KV: KVNamespace; DB: D1Database }
+type Bindings = {
+  KV: KVNamespace
+  DB: D1Database
+  PORKBUN_API_KEY: string
+  PORKBUN_SECRET_KEY: string
+}
 type User = { id: string; email: string; role: string; company_id: number | null; name: string; company_key: string | null }
 type Variables = { user: User }
 
@@ -1227,5 +1232,65 @@ app.get('/app', (c) => {
   return c.html(APP_HTML)
 })
 app.get('/serviceleads', (c) => c.html(SERVICE_LEADS_HTML))
+
+// ── PORKBUN API v3 ────────────────────────────────────────────────────────────
+// All domain registration and management goes through Porkbun exclusively.
+// Keys stored as Cloudflare secrets: PORKBUN_API_KEY, PORKBUN_SECRET_KEY
+// Base URL: https://api.porkbun.com/api/json/v3
+// Auth: apikey + secretapikey in every request body
+
+const PORKBUN_BASE = 'https://api.porkbun.com/api/json/v3'
+
+async function porkbunPost(env: Bindings, path: string, extra: Record<string, unknown> = {}) {
+  const res = await fetch(`${PORKBUN_BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      apikey: env.PORKBUN_API_KEY,
+      secretapikey: env.PORKBUN_SECRET_KEY,
+      ...extra
+    })
+  })
+  return res.json() as Promise<any>
+}
+
+// GET /api/porkbun/ping — test credentials (super_admin only)
+app.get('/api/porkbun/ping', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) {
+    return c.json({ error: 'Porkbun credentials not configured — add PORKBUN_API_KEY and PORKBUN_SECRET_KEY as Cloudflare secrets' }, 503)
+  }
+  try {
+    const data = await porkbunPost(c.env, '/ping')
+    return c.json(data)
+  } catch (err: any) {
+    return c.json({ error: 'Porkbun ping failed', detail: err?.message }, 502)
+  }
+})
+
+// POST /api/porkbun/check — check availability for one or more domains (super_admin only)
+// Body: { domains: ["example.com", "example.ca"] }
+app.post('/api/porkbun/check', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) {
+    return c.json({ error: 'Porkbun credentials not configured' }, 503)
+  }
+  const { domains } = await c.req.json() as { domains: string[] }
+  if (!domains?.length) return c.json({ error: 'domains array required' }, 400)
+
+  const results = await Promise.all(
+    domains.map(async (domain: string) => {
+      try {
+        const data = await porkbunPost(c.env, `/domain/checkDomain/${domain}`)
+        return { domain, ...data }
+      } catch (err: any) {
+        return { domain, status: 'ERROR', error: err?.message }
+      }
+    })
+  )
+  return c.json({ results })
+})
 
 export default app
