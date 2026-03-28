@@ -193,22 +193,36 @@ function renderDomains(domains) {
   }
   const esc  = s => String(s).replace(/'/g, "\\'");
   const isSA = currentUser?.role === 'super_admin';
+  const isCA = currentUser?.role === 'company_admin';
   tbody.innerHTML = domains.map(d => {
     const cat      = d.category === 'emergency' ? 'pill-emergency' : d.category === 'renovation' ? 'pill-renovation' : 'pill-kitchen';
     const status   = d.status === 'Active' ? 'pill-active' : d.status === 'Building' ? 'pill-building' : 'pill-parked';
     const authOk   = d.authorized === 1 || d.authorized === true;
-    const authBadge = authOk
-      ? `<span class="pill pill-auth-ok">✓ Auth</span>`
-      : `<span class="pill pill-auth-pending">Pending</span>`;
+    // Auth badge: show date when authorized
+    let authBadge;
+    if (authOk && d.authorized_at) {
+      const dt = new Date(d.authorized_at);
+      const dateStr = dt.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: '2-digit' });
+      authBadge = `<span class="pill pill-auth-ok" title="Authorized ${dt.toLocaleString()}">✓ Auth <span style="opacity:0.75;font-size:10px">${dateStr}</span></span>`;
+    } else if (authOk) {
+      authBadge = `<span class="pill pill-auth-ok">✓ Auth</span>`;
+    } else {
+      authBadge = `<span class="pill pill-auth-pending">⏳ Pending</span>`;
+    }
     const genBtns  = authOk
       ? `<button class="qf qf-lp"  onclick="event.stopPropagation();fillLP('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">LP</button>
          <button class="qf qf-ads" onclick="event.stopPropagation();fillAds('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">ADS</button>`
       : '';
-    const adminBtn  = isSA
-      ? authOk
+    // super_admin: Authorize / Revoke on every domain
+    // company_admin: Request Auth button on unauthorized domains only
+    let adminBtn = '';
+    if (isSA) {
+      adminBtn = authOk
         ? `<button class="qf qf-revoke" onclick="event.stopPropagation();authorizeDomain(${d.id},'revoke')">Revoke</button>`
-        : `<button class="qf qf-auth"   onclick="event.stopPropagation();authorizeDomain(${d.id},'authorize')">✓ Auth</button>`
-      : '';
+        : `<button class="qf qf-auth"   onclick="event.stopPropagation();authorizeDomain(${d.id},'authorize')">✓ Auth</button>`;
+    } else if (isCA && !authOk) {
+      adminBtn = `<button class="qf qf-request" onclick="event.stopPropagation();requestAuthDomain(${d.id})">Request Auth</button>`;
+    }
     const rowClick  = authOk
       ? `fillFromDomain('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')`
       : `toast('Domain not yet authorized — pending super admin approval','error')`;
@@ -238,6 +252,20 @@ async function authorizeDomain(id, action) {
       loadDomains();
     } else {
       toast(data.error || 'Failed', 'error');
+    }
+  } catch(e) {
+    toast('Error: ' + e.message, 'error');
+  }
+}
+
+async function requestAuthDomain(id) {
+  try {
+    const r = await fetch(`/api/domains/${id}/request-auth`, { method: 'POST' });
+    const data = await r.json();
+    if (r.ok && data.success) {
+      toast('✓ Authorization request submitted — super admin will review');
+    } else {
+      toast(data.error || 'Request failed', 'error');
     }
   } catch(e) {
     toast('Error: ' + e.message, 'error');

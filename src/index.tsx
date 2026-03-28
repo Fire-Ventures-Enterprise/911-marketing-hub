@@ -272,6 +272,24 @@ app.post('/api/domains/:id/revoke', async (c) => {
   return c.json({ success: true, authorized: false })
 })
 
+app.post('/api/domains/:id/request-auth', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  if (user.role === 'super_admin') return c.json({ error: 'Super admin should use /authorize directly' }, 400)
+  const id = parseInt(c.req.param('id'))
+  if (!id || isNaN(id)) return c.json({ error: 'Invalid domain id' }, 400)
+  // Log the request to KV so super admin can review pending requests
+  if (c.env?.KV) {
+    const requestKey = `auth_request:${id}:${user.id}`
+    await c.env.KV.put(requestKey, JSON.stringify({
+      domain_id: id, requested_by: user.id, requester_name: user.name,
+      requester_email: user.email, company_key: user.company_key,
+      requested_at: new Date().toISOString()
+    }), { expirationTtl: 60 * 60 * 24 * 30 }) // 30 days
+  }
+  return c.json({ success: true, message: 'Authorization request submitted — pending super admin approval' })
+})
+
 app.get('/api/companies', async (c) => {
   if (!c.env?.DB) return c.json({ companies: [] })
   const user = c.get('user')

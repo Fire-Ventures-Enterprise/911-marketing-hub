@@ -64,6 +64,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0003_auth.sql` | Creates `users` + `sessions` tables; seeds super admin Nasser Oweis |
 | `migrations/0004_domain_auth.sql` | Adds `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` to `domains`; pre-authorizes all 33 existing domains |
 | `migrations/0005_domain_auth_correction.sql` | Corrects 0004: resets Building and Parked domains to `authorized = 0`; only Active domains remain authorized |
+| `migrations/0006_territory_niche.sql` | Documents `territory` and `niche_angle` columns (added directly to D1 before migration file existed); adds `idx_domains_territory` and `idx_domains_niche_angle` indexes |
 
 ---
 
@@ -108,6 +109,11 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Domain authorization: `authorized`, `authorized_by`, `authorized_at`, `owned_by_tenant` columns added via `ALTER TABLE` in migration `0004_domain_auth.sql`; pre-authorize all existing rows with `UPDATE domains SET authorized = 1 ...` in the same migration
 - Pre-authorization logic: only `Active` domains should be authorized on migration; `Building` and `Parked` domains stay at `authorized = 0` until the tenant explicitly approves — `0004` mistakenly authorized all 33, corrected by `0005_domain_auth_correction.sql` which resets `WHERE status IN ('Building', 'Parked')`
 - D1 authorization state after 0005: Active=16 authorized=1, Building=12 authorized=0, Parked=5 authorized=0 (total 33 domains)
+- If a column is added directly to D1 (outside a migration file), always create the migration file anyway and note "already applied on production" — skipping the migration file creates a gap that breaks fresh-DB setups
+- `territory` and `niche_angle` columns were added directly to D1 before 0006 was written; 0006 documents them and adds the indexes only (safe to run on any state)
+- Domain auth UI role matrix: `super_admin` → Authorize/Revoke on every domain; `company_admin` → Request Auth button on unauthorized domains only; `manager`/`staff` → read-only (no action buttons); auth badge shows ISO date when authorized
+- `POST /api/domains/:id/request-auth` logs request to KV (key: `auth_request:{domain_id}:{user_id}`, TTL 30 days) — super admin reviews and uses `/authorize` to approve
+- `.qf-request` button style added (blue, matches company_admin role color) for Request Auth button
 
 ---
 
