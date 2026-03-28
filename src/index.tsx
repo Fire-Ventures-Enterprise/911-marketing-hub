@@ -6,6 +6,7 @@ import { APP_HTML, SERVICE_LEADS_HTML, LOGIN_HTML } from './pages'
 type Bindings = {
   KV: KVNamespace
   DB: D1Database
+  IMAGES: R2Bucket
   PORKBUN_API_KEY: string
   PORKBUN_SECRET_KEY: string
 }
@@ -106,6 +107,12 @@ type CompanyData = {
   color_bg: string; color_accent: string
   callouts: string[]; sitelinks: Array<{ text: string; url: string }>
 }
+type TemplateLayout = 'hero-left' | 'centered-bold' | 'split-screen' | 'magazine' | 'image-hero' | 'magazine-editorial' | 'minimal-urgency'
+type TemplateConfig = {
+  number: number; name: string; bg: string; accent: string
+  layout: TemplateLayout; heroImageUrl: string | null
+}
+const DEFAULT_TEMPLATE: TemplateConfig = { number: 1, name: 'Bold Emergency', bg: '#1A1A2E', accent: '#CC0000', layout: 'hero-left', heroImageUrl: null }
 
 function getNiche(co: string, service: string): Niche {
   const s = (co + ' ' + service).toLowerCase()
@@ -211,13 +218,14 @@ function getLPExtLinks(niche: Niche): Array<{ href: string; text: string }> {
 
 function generateLandingPage(
   keyword: string, service: string, domain: string, co: string,
-  company: CompanyData, mode: 'ppc' | 'seo' = 'seo'
+  company: CompanyData, mode: 'ppc' | 'seo' = 'seo',
+  tpl: TemplateConfig = DEFAULT_TEMPLATE
 ): string {
   const year   = new Date().getFullYear()
   const phone  = company.phone || ''
   const pd     = phone.replace(/[^0-9]/g, '')
-  const bg     = company.color_bg || '#1A1A2E'
-  const accent = company.color_accent || '#CC0000'
+  const bg     = tpl.bg || company.color_bg || '#1A1A2E'
+  const accent = tpl.accent || company.color_accent || '#CC0000'
   const calls: string[]                              = Array.isArray(company.callouts)  ? company.callouts  : []
   const links: Array<{ text: string; url: string }>  = Array.isArray(company.sitelinks) ? company.sitelinks : []
 
@@ -277,122 +285,7 @@ function generateLandingPage(
     mainEntity: faqs.map(f => ({ '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }))
   })
 
-  // ── HTML sections ────────────────────────────────────────────────────────
-
-  const badgesHtml = calls.map(c => `<div class="badge"><span class="bchk">✓</span>${c}</div>`).join('')
-  const featHtml   = features.map(f => `<div class="fc"><div class="fi">${f.icon}</div><h3>${f.title}</h3><p>${f.desc}</p></div>`).join('')
-  const rvHtml     = reviews.map(r => `<div class="rv"><div class="rstars">⭐⭐⭐⭐⭐</div><blockquote>"${r.text}"</blockquote><cite>— ${r.name}, ${r.area}</cite></div>`).join('')
-  const faqHtml    = faqs.map(f => `<details class="fq"><summary>${f.q}<span class="fq-icon">+</span></summary><p>${f.a}</p></details>`).join('')
-  const slHtml     = links.map(s => `<a href="https://${company.mainDomain}${s.url}">${s.text}</a>`).join('')
-  const galleryHtml = (niche === 'kitchen' || niche === 'renovation') ? `
-<section class="sec sec-alt">
-  <div class="si">
-    <h2 class="st">${niche === 'kitchen' ? 'Our Kitchen Transformations' : 'Recent Projects in Ottawa'}</h2>
-    <p class="ss">Before &amp; after results from ${city} homeowners</p>
-    <div class="gal-grid">${[1,2,3,4,5,6].map(i => `<div class="gal-item" loading="lazy">📷<span>${service} — Project ${i}</span></div>`).join('')}</div>
-    <p class="gal-note">📌 Replace placeholders with real project photos in the admin dashboard.</p>
-  </div>
-</section>` : ''
-
-  const css = `*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth}
-body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#1a1a1a;background:#fff;line-height:1.65}
-img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inherit}
-:root{--bg:${bg};--ac:${accent};--bg2:${bg}dd}
-/* NAV */
-.nav{position:sticky;top:0;z-index:100;background:var(--bg);padding:0 5%;height:68px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 12px rgba(0,0,0,0.2)}
-.nav-brand{color:#fff;font-size:17px;font-weight:800;letter-spacing:-.01em}
-.nav-cta{background:var(--ac);color:#fff;padding:10px 22px;border-radius:6px;font-weight:800;font-size:14px;white-space:nowrap;transition:filter .15s}.nav-cta:hover{filter:brightness(1.1)}
-/* HERO */
-.hero{background:linear-gradient(135deg,var(--bg) 0%,var(--bg) 55%,var(--ac) 100%);color:#fff;padding:64px 5%}
-.hero-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 420px;gap:52px;align-items:center}
-.hero h1{font-size:36px;font-weight:900;line-height:1.15;margin-bottom:14px}
-.hero-sub{font-size:16px;opacity:.88;margin-bottom:24px;line-height:1.6}
-.hero-ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
-.btn-call{background:#fff;color:var(--bg);padding:14px 26px;border-radius:8px;font-weight:800;font-size:16px;display:inline-flex;align-items:center;gap:8px;transition:filter .15s}.btn-call:hover{filter:brightness(.95)}
-.btn-quote{background:transparent;color:#fff;border:2px solid rgba(255,255,255,.55);padding:13px 22px;border-radius:8px;font-weight:700;font-size:14px;transition:border-color .15s}.btn-quote:hover{border-color:#fff}
-.trust-strip{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;opacity:.78}
-.trust-strip span::before{content:'✓ ';font-weight:700}
-/* LEAD FORM */
-.form-wrap{background:#fff;border-radius:14px;padding:28px;color:#1a1a1a;box-shadow:0 12px 40px rgba(0,0,0,.25)}
-.form-wrap h3{font-size:17px;font-weight:800;margin-bottom:16px;color:var(--bg)}
-.ff{margin-bottom:11px}
-.ff input,.ff textarea{width:100%;padding:11px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;transition:border-color .15s}.ff input:focus,.ff textarea:focus{outline:none;border-color:var(--ac)}
-.ff textarea{resize:vertical;min-height:70px}
-.fsub{width:100%;padding:14px;background:var(--ac);color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;transition:filter .15s}.fsub:hover{filter:brightness(1.08)}
-.fthanks{display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:18px;text-align:center;color:#166534;font-weight:700;font-size:15px;line-height:1.6}
-/* BADGES */
-.badges{background:#f1f5f9;padding:20px 5%}
-.badges-inner{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
-.badge{background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:8px 18px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
-.bchk{color:var(--ac);font-weight:900;font-size:15px}
-/* SECTIONS */
-.sec{padding:72px 5%}.sec-alt{background:#f8fafc}
-.si{max-width:1100px;margin:0 auto}
-.st{font-size:30px;font-weight:800;text-align:center;margin-bottom:10px}
-.ss{text-align:center;color:#64748b;margin-bottom:44px;font-size:17px}
-/* FEATURES */
-.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
-.fc{border:1px solid #e2e8f0;border-left:4px solid var(--ac);border-radius:8px;padding:24px}
-.fi{font-size:28px;margin-bottom:12px}
-.fc h3{font-size:16px;font-weight:700;margin-bottom:8px}
-.fc p{font-size:14px;color:#475569;line-height:1.65}
-/* SERVICE DESC */
-.prose p{font-size:16px;line-height:1.85;color:#374151;margin-bottom:16px}
-/* REVIEWS */
-.rv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:40px}
-.rv{border:1px solid #e2e8f0;border-top:4px solid var(--ac);border-radius:8px;padding:24px}
-.rstars{font-size:18px;margin-bottom:12px}
-.rv blockquote{font-size:15px;line-height:1.75;color:#374151;margin-bottom:14px;font-style:italic}
-.rv cite{font-size:13px;font-weight:700;color:#64748b;font-style:normal}
-/* GALLERY */
-.gal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-.gal-item{aspect-ratio:4/3;background:#e2e8f0;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px;color:#94a3b8;font-weight:600;gap:6px}
-.gal-note{text-align:center;margin-top:16px;font-size:12px;color:#94a3b8}
-/* FAQ */
-.fq{border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden}
-.fq summary{padding:16px 20px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:15px}
-.fq summary::-webkit-details-marker{display:none}
-.fq-icon{color:var(--ac);font-size:20px;font-weight:700;flex-shrink:0;transition:transform .2s}
-.fq[open] .fq-icon{transform:rotate(45deg)}
-.fq p{padding:0 20px 16px;font-size:15px;line-height:1.75;color:#475569}
-/* CTA SECTION */
-.cta-sec{background:linear-gradient(135deg,var(--bg) 0%,var(--ac) 100%);color:#fff;padding:84px 5%;text-align:center}
-.cta-sec h2{font-size:34px;font-weight:900;margin-bottom:12px}
-.cta-sec p{font-size:17px;opacity:.9;margin-bottom:32px;max-width:580px;margin-left:auto;margin-right:auto}
-.btn-call-lg{display:inline-flex;align-items:center;gap:10px;background:#fff;color:var(--bg);padding:18px 36px;border-radius:10px;font-weight:800;font-size:20px;margin-bottom:16px;transition:filter .15s}.btn-call-lg:hover{filter:brightness(.97)}
-.cta-sub{display:block;color:rgba(255,255,255,.75);font-size:14px;text-decoration:underline;margin-top:4px}
-/* FOOTER */
-.footer{background:var(--bg);color:rgba(255,255,255,.8);padding:48px 5%}
-.footer-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:2fr 1fr 1fr;gap:36px}
-.fbrand{font-size:19px;font-weight:800;color:#fff;margin-bottom:10px}
-.fcontact{font-size:14px;line-height:1.9}
-.fcontact a{color:var(--ac);font-weight:600}
-.flinks h4,.fareas h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.55;margin-bottom:12px}
-.flinks a{display:block;font-size:14px;padding:3px 0;color:rgba(255,255,255,.65);transition:color .15s}.flinks a:hover{color:#fff}
-.fbottom{border-top:1px solid rgba(255,255,255,.1);padding-top:16px;margin-top:28px;max-width:1100px;margin-left:auto;margin-right:auto;font-size:12px;color:rgba(255,255,255,.35);display:flex;gap:20px;flex-wrap:wrap}
-/* MOBILE STICKY */
-.sticky-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--ac);z-index:200;box-shadow:0 -2px 8px rgba(0,0,0,.2)}
-.sticky-bar a{display:flex;align-items:center;justify-content:center;gap:10px;color:#fff;font-weight:800;font-size:17px;padding:16px;letter-spacing:-.01em}
-/* RESPONSIVE */
-@media(max-width:900px){
-  .hero-inner{grid-template-columns:1fr}
-  .hero h1{font-size:28px}
-  .feat-grid{grid-template-columns:repeat(2,1fr)}
-  .rv-grid{grid-template-columns:1fr}
-  .footer-inner{grid-template-columns:1fr;gap:24px}
-  .gal-grid{grid-template-columns:repeat(2,1fr)}
-  .sticky-bar{display:block}
-  body{padding-bottom:58px}
-}
-@media(max-width:540px){
-  .hero h1{font-size:24px}
-  .feat-grid{grid-template-columns:1fr}
-  .gal-grid{grid-template-columns:1fr}
-  .st{font-size:24px}
-  .btn-call,.btn-quote{width:100%;justify-content:center}
-}`
-
+  // ── SHARED FORM ────────────────────────────────────────────────────────
   const formHtml = `<div class="form-wrap" id="lead-form">
   <h3>📋 ${ctaLabel}</h3>
   <form id="lp-form">
@@ -400,6 +293,7 @@ img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inheri
     <input type="hidden" name="page" value="${domain}">
     <input type="hidden" name="company" value="${co}">
     <input type="hidden" name="keyword" value="${keyword}">
+    <input type="hidden" name="template" value="${tpl.number}">
     <div class="ff"><input type="text" name="name" placeholder="Your Full Name" required></div>
     <div class="ff"><input type="tel" name="phone" placeholder="Phone Number" required></div>
     <div class="ff"><input type="email" name="email" placeholder="Email Address"></div>
@@ -409,52 +303,350 @@ img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inheri
   <div class="fthanks" id="form-thanks">✅ We received your request! Expect a call within ${niche === 'restoration' ? '45 minutes' : '24 hours'}.</div>
 </div>`
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${capWords(service)} ${city} | ${company.name} — ${year}</title>
-<meta name="description" content="Professional ${service.toLowerCase()} in ${city}, ON. ${company.name} — ${calls.slice(0, 2).join(', ') || 'Licensed & Insured'}. Call ${phone} for a free ${niche === 'restoration' ? 'assessment' : 'consultation'}.">
-<meta name="robots" content="${mode === 'ppc' ? 'noindex,nofollow' : 'index,follow'}">
-<link rel="canonical" href="https://${domain}/">
-<script type="application/ld+json">${lbSch}<\/script>
-<script type="application/ld+json">${faqSch}<\/script>
-<style>${css}</style>
-</head>
-<body>
+  const galleryHtml = (niche === 'kitchen' || niche === 'renovation') && tpl.layout !== 'minimal-urgency' ? `
+<section class="sec sec-alt">
+  <div class="si">
+    <h2 class="st">${niche === 'kitchen' ? 'Our Kitchen Transformations' : 'Recent Projects in Ottawa'}</h2>
+    <p class="ss">Before &amp; after results from ${city} homeowners</p>
+    <div class="gal-grid">${[1,2,3,4,5,6].map(i => `<div class="gal-item">📷<span>${service} — Project ${i}</span></div>`).join('')}</div>
+  </div>
+</section>` : ''
 
-<!-- 1. NAV -->
-<nav class="nav">
-  <div class="nav-brand">${company.name}</div>
-  <a href="tel:${pd}" class="nav-cta">📞 ${phone}</a>
-</nav>
+  // ── BASE CSS (shared by all 15 templates) ──────────────────────────────
+  const baseCSS = `*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:system-ui,-apple-system,'Segoe UI',Arial,sans-serif;color:#1a1a1a;background:#fff;line-height:1.65}
+img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inherit}
+:root{--bg:${bg};--ac:${accent};--bg2:${bg}dd}
+.form-wrap{background:#fff;border-radius:14px;padding:28px;color:#1a1a1a;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.form-wrap h3{font-size:17px;font-weight:800;margin-bottom:16px;color:var(--bg)}
+.ff{margin-bottom:11px}
+.ff input,.ff textarea{width:100%;padding:11px 14px;border:2px solid #e5e7eb;border-radius:8px;font-size:14px;font-family:inherit;transition:border-color .15s}
+.ff input:focus,.ff textarea:focus{outline:none;border-color:var(--ac)}
+.ff textarea{resize:vertical;min-height:70px}
+.fsub{width:100%;padding:14px;background:var(--ac);color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;transition:filter .15s}.fsub:hover{filter:brightness(1.08)}
+.fthanks{display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:18px;text-align:center;color:#166534;font-weight:700;font-size:15px;line-height:1.6}
+.badges{background:#f1f5f9;padding:20px 5%}.badges-inner{max-width:1100px;margin:0 auto;display:flex;flex-wrap:wrap;gap:10px;justify-content:center}
+.badge{background:#fff;border:1px solid #e2e8f0;border-radius:20px;padding:8px 18px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.bchk{color:var(--ac);font-weight:900;font-size:15px}
+.sec{padding:72px 5%}.sec-alt{background:#f8fafc}
+.si{max-width:1100px;margin:0 auto}
+.st{font-size:30px;font-weight:800;text-align:center;margin-bottom:10px}
+.ss{text-align:center;color:#64748b;margin-bottom:44px;font-size:17px}
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.fc{border:1px solid #e2e8f0;border-left:4px solid var(--ac);border-radius:8px;padding:24px}
+.fi{font-size:28px;margin-bottom:12px}.fc h3{font-size:16px;font-weight:700;margin-bottom:8px}.fc p{font-size:14px;color:#475569;line-height:1.65}
+.prose p{font-size:16px;line-height:1.85;color:#374151;margin-bottom:16px}
+.rv-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:40px}
+.rv{border:1px solid #e2e8f0;border-top:4px solid var(--ac);border-radius:8px;padding:24px}
+.rstars{font-size:18px;margin-bottom:12px}
+.rv blockquote{font-size:15px;line-height:1.75;color:#374151;margin-bottom:14px;font-style:italic}
+.rv cite{font-size:13px;font-weight:700;color:#64748b;font-style:normal}
+.gal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.gal-item{aspect-ratio:4/3;background:#e2e8f0;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px;color:#94a3b8;font-weight:600;gap:6px}
+.fq{border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden}
+.fq summary{padding:16px 20px;font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:15px}
+.fq summary::-webkit-details-marker{display:none}.fq-icon{color:var(--ac);font-size:20px;font-weight:700;flex-shrink:0;transition:transform .2s}
+.fq[open] .fq-icon{transform:rotate(45deg)}.fq p{padding:0 20px 16px;font-size:15px;line-height:1.75;color:#475569}
+.cta-sec{background:linear-gradient(135deg,var(--bg) 0%,var(--ac) 100%);color:#fff;padding:84px 5%;text-align:center}
+.cta-sec h2{font-size:34px;font-weight:900;margin-bottom:12px}
+.cta-sec p{font-size:17px;opacity:.9;margin-bottom:32px;max-width:580px;margin-left:auto;margin-right:auto}
+.btn-call-lg{display:inline-flex;align-items:center;gap:10px;background:#fff;color:var(--bg);padding:18px 36px;border-radius:10px;font-weight:800;font-size:20px;margin-bottom:16px;transition:filter .15s}.btn-call-lg:hover{filter:brightness(.97)}
+.cta-sub{display:block;color:rgba(255,255,255,.75);font-size:14px;text-decoration:underline;margin-top:4px}
+.footer{background:var(--bg);color:rgba(255,255,255,.8);padding:48px 5%}
+.footer-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:2fr 1fr 1fr;gap:36px}
+.fbrand{font-size:19px;font-weight:800;color:#fff;margin-bottom:10px}.fcontact{font-size:14px;line-height:1.9}.fcontact a{color:var(--ac);font-weight:600}
+.flinks h4,.fareas h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;opacity:.55;margin-bottom:12px}
+.flinks a{display:block;font-size:14px;padding:3px 0;color:rgba(255,255,255,.65)}.flinks a:hover{color:#fff}
+.fbottom{border-top:1px solid rgba(255,255,255,.1);padding-top:16px;margin-top:28px;max-width:1100px;margin-left:auto;margin-right:auto;font-size:12px;color:rgba(255,255,255,.35);display:flex;gap:20px;flex-wrap:wrap}
+.sticky-bar{display:none;position:fixed;bottom:0;left:0;right:0;background:var(--ac);z-index:200;box-shadow:0 -2px 8px rgba(0,0,0,.2)}
+.sticky-bar a{display:flex;align-items:center;justify-content:center;gap:10px;color:#fff;font-weight:800;font-size:17px;padding:16px}
+@media(max-width:900px){
+  .hero-inner,.mag-in,.img-inner,.ed-hero-in{grid-template-columns:1fr!important}
+  .hero h1,.ctr-h1,.img-txt h1,.ed-txt h1{font-size:28px!important}
+  .feat-grid{grid-template-columns:repeat(2,1fr)}.rv-grid{grid-template-columns:1fr}
+  .footer-inner{grid-template-columns:1fr;gap:24px}.gal-grid{grid-template-columns:repeat(2,1fr)}
+  .sticky-bar{display:block}body{padding-bottom:58px}
+  .split-wrap{flex-direction:column!important}
+  .split-l,.split-r{width:100%!important;min-height:auto!important;position:static!important}
+  .split-form-wrap{margin-top:0!important}
+}
+@media(max-width:540px){
+  .hero h1,.ctr-h1,.img-txt h1,.min-h1{font-size:24px!important}
+  .ctr-h1{font-size:36px!important}.min-phone{font-size:44px!important}
+  .feat-grid,.gal-grid{grid-template-columns:1fr}.st{font-size:24px}
+}`
 
-<!-- 2+3. HERO + LEAD FORM -->
-<section class="hero">
+  // ── LAYOUT CSS (one per layout type) ───────────────────────────────────
+  const navStd = `.nav{position:sticky;top:0;z-index:100;background:var(--bg);padding:0 5%;height:68px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 12px rgba(0,0,0,.2)}
+.nav-brand{color:#fff;font-size:17px;font-weight:800;letter-spacing:-.01em}
+.nav-cta{background:var(--ac);color:#fff;padding:10px 22px;border-radius:6px;font-weight:800;font-size:14px;white-space:nowrap;transition:filter .15s}.nav-cta:hover{filter:brightness(1.1)}`
+
+  const layoutCSS: Record<TemplateLayout, string> = {
+    'hero-left': `${navStd}
+.hero{background:linear-gradient(135deg,var(--bg) 0%,var(--bg) 55%,var(--ac) 100%);color:#fff;padding:64px 5%;position:relative}
+.emrg-badge{position:absolute;top:16px;right:5%;background:var(--ac);color:#fff;padding:5px 14px;border-radius:4px;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.hero-inner{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 420px;gap:52px;align-items:center}
+.hero h1{font-size:36px;font-weight:900;line-height:1.15;margin-bottom:14px}
+.hero-sub{font-size:16px;opacity:.88;margin-bottom:24px;line-height:1.6}
+.hero-ctas{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}
+.btn-call{background:#fff;color:var(--bg);padding:14px 26px;border-radius:8px;font-weight:800;font-size:16px;display:inline-flex;align-items:center;gap:8px;transition:filter .15s}.btn-call:hover{filter:brightness(.95)}
+.btn-q{background:transparent;color:#fff;border:2px solid rgba(255,255,255,.55);padding:13px 22px;border-radius:8px;font-weight:700;font-size:14px;transition:border-color .15s}.btn-q:hover{border-color:#fff}
+.trust-strip{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;opacity:.78}.trust-strip span::before{content:'✓ ';font-weight:700}`,
+
+    'centered-bold': `${navStd}
+.hero{background:linear-gradient(160deg,var(--bg) 0%,var(--bg2,#111) 100%);color:#fff;padding:88px 5%;text-align:center}
+.ctr-h1{font-size:56px;font-weight:900;line-height:1.1;margin-bottom:20px;max-width:840px;margin-left:auto;margin-right:auto}
+.hero-sub{font-size:18px;opacity:.85;margin-bottom:36px;max-width:640px;margin-left:auto;margin-right:auto}
+.btn-phone-big{display:inline-flex;align-items:center;gap:12px;background:var(--ac);color:#fff;padding:20px 48px;border-radius:10px;font-weight:900;font-size:22px;transition:filter .15s}.btn-phone-big:hover{filter:brightness(1.1)}
+.btn-q-ctr{display:block;color:rgba(255,255,255,.6);font-size:15px;margin-top:14px;text-decoration:underline}
+.trust-strip{display:flex;flex-wrap:wrap;gap:16px;font-size:12px;opacity:.65;justify-content:center;margin-top:28px}.trust-strip span::before{content:'✓ ';font-weight:700}
+.form-below{padding:60px 5%;background:#f8fafc}.form-ctr{max-width:560px;margin:0 auto}`,
+
+    'split-screen': `
+.split-wrap{display:flex;min-height:100vh}
+.split-l{width:45%;background:var(--bg);color:#fff;display:flex;flex-direction:column;position:sticky;top:0;max-height:100vh;overflow:hidden}
+.split-nav{padding:18px 36px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(255,255,255,.12)}
+.nav-brand{color:#fff;font-size:16px;font-weight:800}
+.nav-cta-sp{background:var(--ac);color:#fff;padding:8px 16px;border-radius:6px;font-weight:800;font-size:13px}
+.split-content{padding:48px 36px;flex:1;display:flex;flex-direction:column;justify-content:center;overflow:auto}
+.split-l h1{font-size:30px;font-weight:900;line-height:1.2;margin-bottom:16px}
+.split-l .hero-sub{font-size:15px;opacity:.82;margin-bottom:24px;line-height:1.7}
+.trust-strip{display:flex;flex-wrap:wrap;gap:10px;font-size:11px;opacity:.7;margin-bottom:20px}.trust-strip span::before{content:'✓ ';font-weight:700}
+.badges-sp{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.badge-sp{background:rgba(255,255,255,.12);color:#fff;padding:5px 12px;border-radius:4px;font-size:11px;font-weight:600;border:1px solid rgba(255,255,255,.2)}
+.trust-badge-sp{display:inline-block;background:var(--ac);color:#fff;padding:6px 16px;border-radius:20px;font-size:12px;font-weight:800;margin-bottom:18px}
+.split-r{width:55%;background:#f8fafc;padding:40px;overflow-y:auto}
+.split-form-wrap{max-width:460px;margin:60px auto 0}`,
+
+    'magazine': `
+.mag-header{background:var(--bg);padding:14px 5%;display:flex;align-items:center;justify-content:space-between;border-bottom:4px solid var(--ac)}
+.mag-brand{color:#fff;font-size:20px;font-weight:900;letter-spacing:-.02em}
+.mag-date{color:rgba(255,255,255,.5);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.mag-phone{background:var(--ac);color:#fff;padding:8px 20px;border-radius:4px;font-weight:800;font-size:14px;white-space:nowrap}
+.mag-hero{padding:40px 5%;border-bottom:1px solid #e2e8f0}
+.mag-in{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 380px;gap:48px;align-items:start}
+.mag-main h1{font-size:38px;font-weight:900;line-height:1.15;margin-bottom:14px;color:var(--bg)}
+.mag-main .hero-sub{font-size:15px;color:#475569;margin-bottom:20px;line-height:1.7}
+.trust-strip{display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:#64748b;margin-bottom:12px}.trust-strip span::before{content:'✓ ';font-weight:700;color:var(--ac)}
+.btn-call{display:inline-flex;align-items:center;gap:8px;background:var(--ac);color:#fff;padding:13px 26px;border-radius:5px;font-weight:800;font-size:15px;transition:filter .15s}.btn-call:hover{filter:brightness(1.08)}`,
+
+    'image-hero': `${navStd}
+.img-hero{min-height:90vh;background-size:cover;background-position:center;background-color:var(--bg);position:relative}
+.img-overlay{position:absolute;inset:0;background:linear-gradient(135deg,rgba(0,0,0,.78) 0%,rgba(0,0,0,.42) 100%);display:flex;flex-direction:column}
+.img-inner{flex:1;display:grid;grid-template-columns:1fr 420px;gap:48px;align-items:center;padding:40px 5%;max-width:1200px;margin:0 auto;width:100%}
+.img-txt{color:#fff}.img-txt h1{font-size:40px;font-weight:900;line-height:1.15;margin-bottom:16px}
+.img-txt .hero-sub{font-size:17px;opacity:.88;margin-bottom:28px;line-height:1.65}
+.btn-call{background:#fff;color:var(--bg);padding:14px 28px;border-radius:8px;font-weight:800;font-size:16px;display:inline-flex;align-items:center;gap:8px;transition:filter .15s}.btn-call:hover{filter:brightness(.95)}
+.trust-strip{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;opacity:.75;margin-top:18px}.trust-strip span::before{content:'✓ ';font-weight:700}`,
+
+    'magazine-editorial': `
+.ed-head{background:var(--bg);padding:16px 5%;display:flex;align-items:center;justify-content:space-between}
+.ed-brand{color:#fff;font-size:22px;font-weight:900;font-family:Georgia,serif}
+.ed-phone{background:var(--ac);color:#fff;padding:10px 22px;border-radius:4px;font-weight:800;font-size:14px}
+.ed-hero{padding:48px 5%;background:var(--bg2,#f9f5ee)}
+.ed-hero-in{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 400px;gap:52px;align-items:start}
+.ed-txt h1{font-size:38px;font-weight:900;line-height:1.15;color:var(--bg);margin-bottom:16px;font-family:Georgia,serif}
+.ed-txt .hero-sub{font-size:16px;color:#5a4a3a;margin-bottom:22px;line-height:1.75}
+.btn-call{background:var(--ac);color:#fff;padding:13px 26px;border-radius:5px;font-weight:800;font-size:15px;display:inline-flex;align-items:center;gap:8px;margin-right:10px;transition:filter .15s}.btn-call:hover{filter:brightness(1.08)}
+.btn-q{background:transparent;color:var(--bg);border:2px solid var(--bg);padding:12px 20px;border-radius:5px;font-weight:700;font-size:14px;transition:opacity .15s}.btn-q:hover{opacity:.7}
+.trust-strip{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:#7a6a5a;margin-top:16px}.trust-strip span::before{content:'✓ ';font-weight:700;color:var(--ac)}`,
+
+    'minimal-urgency': `
+.min-wrap{background:var(--bg);min-height:56vh;display:flex;align-items:center;justify-content:center;padding:60px 5%;text-align:center}
+.min-inner{max-width:760px}
+.min-h1{font-size:40px;font-weight:900;color:#fff;line-height:1.15;margin-bottom:24px}
+.min-phone{display:block;font-size:80px;font-weight:900;color:var(--ac);letter-spacing:-.03em;margin-bottom:16px;line-height:1;transition:filter .15s}.min-phone:hover{filter:brightness(1.1)}
+.min-sub{font-size:17px;color:rgba(255,255,255,.75);line-height:1.65;max-width:560px;margin:0 auto 28px}
+.min-form{padding:52px 5%;background:#f8fafc}.min-form-in{max-width:540px;margin:0 auto}`
+  }
+
+  // ── TEMPLATE VISUAL OVERRIDES (typography + decorators per template) ────
+  const tplOverrides: Record<number, string> = {
+    1:  `.hero h1{text-shadow:0 2px 12px rgba(0,0,0,.4)}.fc{border-left-width:5px}.emrg-badge{animation:epulse 2s infinite}@keyframes epulse{0%,100%{opacity:1}50%{opacity:.65}}`,
+    2:  `.ctr-h1{color:var(--ac)!important;font-size:80px;letter-spacing:-.04em}.hero{background:#fff!important}.ctr-h1,.hero-sub{color:#1a1a1a!important}.trust-strip{color:#94a3b8!important;opacity:1!important}.btn-phone-big{box-shadow:0 8px 28px rgba(204,0,0,.3)}`,
+    3:  `.split-l h1{text-transform:uppercase;letter-spacing:-.02em;font-size:32px}.badge-sp{text-transform:uppercase;letter-spacing:.06em;font-size:10px}.fc{border-left:none;border-top:4px solid var(--ac);border-radius:2px}.fc h3{text-transform:uppercase;letter-spacing:.04em;font-size:13px}`,
+    4:  `.mag-main h1{font-family:Georgia,serif;font-size:42px}.st{font-family:Georgia,serif}.fq summary{font-family:Georgia,serif}.rv{border-radius:2px;border-top-width:2px}`,
+    5:  `.img-txt h1{font-family:Georgia,serif;font-size:44px;text-shadow:0 2px 14px rgba(0,0,0,.55)}.img-txt .hero-sub{text-shadow:0 1px 6px rgba(0,0,0,.45)}.form-wrap{border:2px solid rgba(212,175,55,.35);box-shadow:0 24px 64px rgba(0,0,0,.45)}.fsub{background:linear-gradient(90deg,#c9a227,#e8c540)!important}`,
+    6:  `.st,.ed-txt h1{font-family:Georgia,serif}.sec-alt{background:#f9f3e8!important}.sec{background:#fffbf0}.rv{background:#fff;border:none;box-shadow:0 4px 20px rgba(0,0,0,.06)}.rv blockquote::before{content:open-quote;font-size:48px;color:var(--ac);font-family:Georgia,serif;line-height:.8;float:left;margin-right:6px}`,
+    7:  `.nav{background:#0a0a0a!important}.hero{background:#0a0a0a!important}.hero h1{text-shadow:0 0 32px rgba(59,130,246,.55)}.btn-call{box-shadow:0 0 20px rgba(59,130,246,.35)}.fc{background:#111;color:#fff;border-color:#1e293b}.fc p{color:#94a3b8}.fc h3{color:#fff}.fsub{background:linear-gradient(90deg,var(--ac),#60a5fa)!important;animation:gshift 3s infinite}@keyframes gshift{0%,100%{filter:hue-rotate(0deg)}50%{filter:hue-rotate(12deg)}}`,
+    8:  `.fc{background:#f0fdf4;border-left-color:var(--ac)}.badge-sp{border-radius:20px}.split-r{background:#fff}`,
+    9:  `.ctr-h1{background:linear-gradient(135deg,#fff,var(--ac));-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-size:62px;letter-spacing:-.03em}.btn-phone-big{background:linear-gradient(135deg,var(--ac),#c084fc)!important;box-shadow:0 8px 32px rgba(168,85,247,.45)}.hero{background:linear-gradient(160deg,#1e0a2e,#2d1b69,#1e0a2e)!important}.rv{background:#1a0d2e;color:#fff;border-top-color:var(--ac)}.rv blockquote,.rv cite{color:#c4b5fd}.sec-alt{background:#0f0720!important}.st,.fc h3,.fq summary{color:#e9d5ff}.fc{background:#1a0d2e;border-left-color:var(--ac)}.fc p{color:#a78bfa}.fq{background:#1a0d2e;border-color:#3b2060}.fq p{color:#c4b5fd}`,
+    10: `.hero h1{font-size:44px;font-weight:900;letter-spacing:-.04em;text-transform:uppercase}.fc{border-left:none;border-top:4px solid var(--ac);border-radius:3px}.fc h3{text-transform:uppercase;letter-spacing:.06em;font-size:13px}.btn-call{box-shadow:0 4px 16px rgba(249,115,22,.3)}`,
+    11: `.split-l h1{font-size:28px;letter-spacing:-.01em}.badge-sp{border-radius:3px;font-size:10px;letter-spacing:.05em;text-transform:uppercase}.fc{border-left-width:3px;border-radius:2px}`,
+    12: `.mag-header{background:#1e3a5f!important;border-bottom-color:var(--ac)}.mag-main h1{color:#1e3a5f;font-size:34px;letter-spacing:-.02em}.st{color:#1e3a5f}.fc h3{color:#1e3a5f}.fq summary{color:#1e3a5f}.btn-call{border-radius:2px}`,
+    13: `.min-phone{font-size:96px;text-shadow:0 4px 20px rgba(139,0,0,.5)}.min-h1{font-size:38px}.cta-sec{background:var(--bg)!important}`,
+    14: `.ed-txt h1{font-size:34px;color:#4a2c1a;font-family:Georgia,serif}.ed-head{background:#4a2c1a!important}.ed-hero{background:#fdf6ec!important}.sec-alt{background:#fdf6ec!important}.rv{background:#fff8f0;border-top-color:var(--ac)}.badge{background:#fff8f0;border-color:#e8c8a8}.fc{background:#fffaf5;border-left-color:var(--ac)}.cta-sec{background:linear-gradient(135deg,#4a2c1a,var(--ac))!important}`,
+    15: `.ctr-h1{font-family:Georgia,serif;font-size:58px;letter-spacing:-.02em;color:#fff}.hero-sub{font-family:Georgia,serif;font-weight:300;letter-spacing:.02em}.btn-phone-big{background:transparent!important;border:2px solid var(--ac)!important;color:var(--ac)!important;font-family:Georgia,serif;letter-spacing:.06em;text-transform:uppercase;font-size:18px!important}.hero{background:#0a0a0a!important}.nav{background:#0a0a0a!important}.rv{background:#111;border-top-color:var(--ac);color:#fff}.rv blockquote{color:#d4d4d4}.rv cite{color:#737373}.sec-alt{background:#0a0a0a!important}.sec{background:#111}.st,.prose p,.fq summary,.fq p{color:#e5e5e5}.fc{background:#0a0a0a;border-left-color:var(--ac);color:#fff}.fc h3{color:#fff}.fc p{color:#a3a3a3}.fq{background:#111;border-color:#262626}.badges{background:#0a0a0a!important}.badge{background:#111!important;border-color:#262626!important;color:#e5e5e5!important}`
+  }
+
+  // ── HERO HTML (one per layout type) ────────────────────────────────────
+  let heroHtml = ''
+  switch (tpl.layout) {
+    case 'hero-left': {
+      const emrg = (isEmergency || [1,7,10].includes(tpl.number)) ? '<div class="emrg-badge">⚡ 24/7 EMERGENCY</div>' : ''
+      heroHtml = `
+<nav class="nav"><div class="nav-brand">${company.name}</div><a href="tel:${pd}" class="nav-cta">📞 ${phone}</a></nav>
+<section class="hero">${emrg}
   <div class="hero-inner">
-    <div class="hero-text">
+    <div>
       <h1>${h1}</h1>
       <p class="hero-sub">${heroSub}</p>
       <div class="hero-ctas">
         <a href="tel:${pd}" class="btn-call">📞 Call ${phone}</a>
-        <a href="#lead-form" class="btn-quote">Get Free Quote ↓</a>
+        <a href="#lead-form" class="btn-q">Get Free Quote ↓</a>
       </div>
       <div class="trust-strip">
-        <span>Google Rated 4.9</span>
-        <span>Licensed &amp; Insured</span>
-        <span>Serving ${city} Since 2005</span>
+        <span>Google Rated 4.9</span><span>Licensed &amp; Insured</span><span>Ottawa Since 2005</span>
         ${niche === 'restoration' ? '<span>IICRC Certified</span>' : ''}
       </div>
     </div>
     ${formHtml}
   </div>
+</section>`
+      break
+    }
+    case 'centered-bold': {
+      heroHtml = `
+<nav class="nav"><div class="nav-brand">${company.name}</div><a href="tel:${pd}" class="nav-cta">📞 ${phone}</a></nav>
+<section class="hero">
+  <h1 class="ctr-h1">${h1}</h1>
+  <p class="hero-sub">${heroSub}</p>
+  <a href="tel:${pd}" class="btn-phone-big">📞 ${phone}</a>
+  <a href="#lead-form" class="btn-q-ctr">↓ Get Free ${niche === 'restoration' ? 'Assessment' : 'Consultation'} Below</a>
+  <div class="trust-strip">
+    <span>Google Rated 4.9</span><span>Licensed &amp; Insured</span><span>Ottawa Since 2005</span>
+    ${niche === 'restoration' ? '<span>IICRC Certified</span>' : ''}
+  </div>
 </section>
+<section class="form-below" id="lead-form">
+  <div class="form-ctr">${formHtml}</div>
+</section>`
+      break
+    }
+    case 'split-screen': {
+      const trustBadge = tpl.number === 8
+        ? `<div class="trust-badge-sp">🌿 Locally Trusted Since ${year - 19}</div>`
+        : ''
+      heroHtml = `
+<div class="split-wrap">
+  <div class="split-l">
+    <nav class="split-nav"><div class="nav-brand">${company.name}</div><a href="tel:${pd}" class="nav-cta-sp">📞 ${phone}</a></nav>
+    <div class="split-content">
+      ${trustBadge}
+      <h1>${h1}</h1>
+      <p class="hero-sub">${heroSub}</p>
+      <div class="trust-strip">
+        <span>Google Rated 4.9</span><span>Licensed &amp; Insured</span><span>Ottawa Since 2005</span>
+      </div>
+      <div class="badges-sp">${calls.map(c => `<div class="badge-sp">✓ ${c}</div>`).join('')}</div>
+    </div>
+  </div>
+  <div class="split-r">
+    <div class="split-form-wrap">${formHtml}</div>
+  </div>
+</div>`
+      break
+    }
+    case 'magazine': {
+      const dateStr = new Date().toLocaleDateString('en-CA', { month: 'long', year: 'numeric' })
+      heroHtml = `
+<header class="mag-header">
+  <div class="mag-brand">${company.name}</div>
+  <div class="mag-date">${city} — ${dateStr}</div>
+  <a href="tel:${pd}" class="mag-phone">📞 ${phone}</a>
+</header>
+<section class="mag-hero">
+  <div class="mag-in">
+    <div class="mag-main">
+      <div class="trust-strip"><span>Google Rated 4.9</span><span>Licensed &amp; Insured</span><span>Ottawa Since 2005</span></div>
+      <h1>${h1}</h1>
+      <p class="hero-sub">${heroSub}</p>
+      <a href="tel:${pd}" class="btn-call">📞 Call ${phone}</a>
+    </div>
+    <div id="lead-form">${formHtml}</div>
+  </div>
+</section>`
+      break
+    }
+    case 'image-hero': {
+      const bgStyle = tpl.heroImageUrl
+        ? `background-image:url('${tpl.heroImageUrl}')`
+        : `background:linear-gradient(135deg,var(--bg) 0%,var(--bg2) 100%)`
+      heroHtml = `
+<nav class="nav"><div class="nav-brand">${company.name}</div><a href="tel:${pd}" class="nav-cta">📞 ${phone}</a></nav>
+<section class="img-hero" style="${bgStyle}">
+  <div class="img-overlay">
+    <div class="img-inner">
+      <div class="img-txt">
+        <h1>${h1}</h1>
+        <p class="hero-sub">${heroSub}</p>
+        <a href="tel:${pd}" class="btn-call">📞 Call ${phone}</a>
+        <div class="trust-strip">
+          <span>Google Rated 4.9</span><span>Licensed &amp; Insured</span><span>Ottawa Since 2005</span>
+        </div>
+      </div>
+      ${formHtml}
+    </div>
+  </div>
+</section>`
+      break
+    }
+    case 'magazine-editorial': {
+      const bgStyle = tpl.heroImageUrl
+        ? `background-image:url('${tpl.heroImageUrl}');background-size:cover;background-position:center`
+        : `background:var(--bg2,#f9f5ee)`
+      heroHtml = `
+<header class="ed-head">
+  <div class="ed-brand">${company.name}</div>
+  <a href="tel:${pd}" class="ed-phone">📞 ${phone}</a>
+</header>
+<section class="ed-hero" style="${bgStyle}">
+  <div class="ed-hero-in">
+    <div class="ed-txt">
+      <h1>${h1}</h1>
+      <p class="hero-sub">${heroSub}</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+        <a href="tel:${pd}" class="btn-call">📞 Call ${phone}</a>
+        <a href="#lead-form" class="btn-q">Get Free Quote ↓</a>
+      </div>
+      <div class="trust-strip">
+        <span>Google Rated 4.9</span><span>Licensed &amp; Insured</span><span>Ottawa Since 2005</span>
+      </div>
+    </div>
+    <div id="lead-form">${formHtml}</div>
+  </div>
+</section>`
+      break
+    }
+    case 'minimal-urgency': {
+      heroHtml = `
+<section class="min-wrap">
+  <div class="min-inner">
+    <h1 class="min-h1">${h1}</h1>
+    <a href="tel:${pd}" class="min-phone">${phone}</a>
+    <p class="min-sub">${heroSub}</p>
+  </div>
+</section>
+<section class="min-form" id="lead-form">
+  <div class="min-form-in">${formHtml}</div>
+</section>`
+      break
+    }
+  }
 
-<!-- 4. TRUST BADGES -->
-<div class="badges"><div class="badges-inner">${badgesHtml}</div></div>
+  // ── BODY SECTIONS ───────────────────────────────────────────────────────
+  const badgesHtml = calls.map(c => `<div class="badge"><span class="bchk">✓</span>${c}</div>`).join('')
+  const featHtml   = features.map(f => `<div class="fc"><div class="fi">${f.icon}</div><h3>${f.title}</h3><p>${f.desc}</p></div>`).join('')
+  const rvHtml     = reviews.map(r => `<div class="rv"><div class="rstars">⭐⭐⭐⭐⭐</div><blockquote>"${r.text}"</blockquote><cite>— ${r.name}, ${r.area}</cite></div>`).join('')
+  const faqHtml    = faqs.map(f => `<details class="fq"><summary>${f.q}<span class="fq-icon">+</span></summary><p>${f.a}</p></details>`).join('')
+  const slHtml     = links.map(s => `<a href="https://${company.mainDomain}${s.url}">${s.text}</a>`).join('')
 
-<!-- 5. FEATURES GRID -->
+  const badgesSection = tpl.layout === 'split-screen' || tpl.layout === 'minimal-urgency' ? '' :
+    `<div class="badges"><div class="badges-inner">${badgesHtml}</div></div>`
+
+  const bodySections = `
+${badgesSection}
 <section class="sec">
   <div class="si">
     <h2 class="st">Why ${city} Trusts ${company.name}</h2>
@@ -462,33 +654,21 @@ img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inheri
     <div class="feat-grid">${featHtml}</div>
   </div>
 </section>
-
-<!-- 6. SERVICE DESCRIPTION -->
 <section class="sec sec-alt">
   <div class="si">
     <h2 class="st">${capWords(service)} in ${city}</h2>
-    <div class="prose">
-      <p>${p1}</p>
-      <p>${p2}</p>
-      <p>${p3}</p>
-      ${extHtml}
-    </div>
+    <div class="prose"><p>${p1}</p><p>${p2}</p>${tpl.layout !== 'minimal-urgency' ? `<p>${p3}</p>` : ''}${extHtml}</div>
   </div>
 </section>
-
-<!-- 7. REVIEWS -->
+${tpl.layout !== 'minimal-urgency' ? `
 <section class="sec">
   <div class="si">
     <h2 class="st">What ${city} Homeowners Say</h2>
-    <p class="ss">Real results from real customers — add your own reviews in the admin dashboard</p>
+    <p class="ss">Real results from real customers</p>
     <div class="rv-grid">${rvHtml}</div>
   </div>
-</section>
-
-<!-- 8. GALLERY (kitchen + renovation only) -->
+</section>` : ''}
 ${galleryHtml}
-
-<!-- 9. FAQ -->
 <section class="sec sec-alt">
   <div class="si">
     <h2 class="st">Frequently Asked Questions</h2>
@@ -496,69 +676,60 @@ ${galleryHtml}
     <div style="max-width:760px;margin:0 auto">${faqHtml}</div>
   </div>
 </section>
-
-<!-- 10. URGENCY CTA -->
 <section class="cta-sec">
   <h2>Ready to Get Started?</h2>
   <p>${urgency}</p>
   <a href="tel:${pd}" class="btn-call-lg">📞 Call ${phone} Now</a>
   <a href="#lead-form" class="cta-sub">Or fill out our form — we respond fast</a>
 </section>
-
-<!-- 11. FOOTER -->
 <footer class="footer">
   <div class="footer-inner">
     <div>
       <div class="fbrand">${company.name}</div>
-      <div class="fcontact">
-        <a href="tel:${pd}">${phone}</a><br>
+      <div class="fcontact"><a href="tel:${pd}">${phone}</a><br>
         <a href="https://${company.mainDomain}" target="_blank" rel="noopener">${company.mainDomain}</a><br>
-        Serving: ${nbhd}
-      </div>
+        Serving: ${nbhd}</div>
     </div>
-    <div class="flinks">
-      <h4>Services</h4>
-      ${slHtml || `<a href="https://${company.mainDomain}">${service}</a>`}
-    </div>
-    <div class="fareas">
-      <h4>Areas Served</h4>
+    <div class="flinks"><h4>Services</h4>${slHtml || `<a href="https://${company.mainDomain}">${service}</a>`}</div>
+    <div class="fareas"><h4>Areas Served</h4>
       <div style="font-size:13px;line-height:2;color:rgba(255,255,255,.6)">Ottawa · Kanata · Barrhaven<br>Orleans · Nepean · Gloucester</div>
     </div>
   </div>
   <div class="fbottom">
     <span>&copy; ${year} ${company.name}. All rights reserved.</span>
     <span>Licensed &amp; Insured in Ontario</span>
-    <span>${mode === 'ppc' ? 'Paid Search Landing Page' : `<a href="https://${company.mainDomain}" style="color:rgba(255,255,255,.5)">${company.mainDomain}</a>`}</span>
+    <span>Template ${tpl.number}: ${tpl.name}</span>
+    <span>${mode === 'ppc' ? 'Paid Search' : `<a href="https://${company.mainDomain}" style="color:rgba(255,255,255,.4)">${company.mainDomain}</a>`}</span>
   </div>
 </footer>
+<div class="sticky-bar"><a href="tel:${pd}">📞 Call Now — ${phone}</a></div>`
 
-<!-- MOBILE STICKY CTA -->
-<div class="sticky-bar">
-  <a href="tel:${pd}">📞 Call Now — ${phone}</a>
-</div>
+  const fullCSS = baseCSS + layoutCSS[tpl.layout] + (tplOverrides[tpl.number] || '')
 
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${capWords(service)} ${city} | ${company.name} — ${year}</title>
+<meta name="description" content="Professional ${service.toLowerCase()} in ${city}, ON. ${company.name} — ${calls.slice(0, 2).join(', ') || 'Licensed & Insured'}. Call ${phone} for a free ${niche === 'restoration' ? 'assessment' : 'consultation'}.">
+<meta name="robots" content="${mode === 'ppc' ? 'noindex,nofollow' : 'index,follow'}">
+<link rel="canonical" href="https://${domain}/">
+<script type="application/ld+json">${lbSch}<\/script>
+<script type="application/ld+json">${faqSch}<\/script>
+<style>${fullCSS}</style>
+</head>
+<body>
+${heroHtml}
+${bodySections}
 <script>
-document.getElementById('lp-form').addEventListener('submit', async function(e) {
-  e.preventDefault();
-  const btn = this.querySelector('.fsub');
-  btn.textContent = 'Sending...';
-  btn.disabled = true;
-  try {
-    const data = Object.fromEntries(new FormData(this));
-    await fetch('/api/leads', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data) });
-    this.style.display = 'none';
-    document.getElementById('form-thanks').style.display = 'block';
-  } catch {
-    btn.textContent = 'Error — please call us directly';
-    btn.disabled = false;
-  }
+document.getElementById('lp-form').addEventListener('submit',async function(e){
+  e.preventDefault();var btn=this.querySelector('.fsub');btn.textContent='Sending...';btn.disabled=true;
+  try{var data=Object.fromEntries(new FormData(this));
+    await fetch('/api/leads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+    this.style.display='none';document.getElementById('form-thanks').style.display='block';
+  }catch{btn.textContent='Error — please call us directly';btn.disabled=false;}
 });
-document.querySelectorAll('.fq').forEach(function(d) {
-  d.addEventListener('toggle', function() {
-    var icon = this.querySelector('.fq-icon');
-    if (icon) icon.textContent = this.open ? '−' : '+';
-  });
-});
+document.querySelectorAll('.fq').forEach(function(d){d.addEventListener('toggle',function(){var i=this.querySelector('.fq-icon');if(i)i.textContent=this.open?'−':'+';});});
 <\/script>
 </body>
 </html>`
@@ -1040,7 +1211,7 @@ app.post('/api/generate/landing-page', async (c) => {
   if (!keyword || !service || !domain) return c.json({ error: 'keyword, service, domain required' }, 400)
   const detected = detectCompany(domain, keyword, co)
 
-  // Fetch company data from D1 — white-label, never hardcoded
+  // ── Fetch company data from D1 ─────────────────────────────────────────
   let companyData: CompanyData | null = null
   if (c.env?.DB) {
     try {
@@ -1049,34 +1220,84 @@ app.post('/api/generate/landing-page', async (c) => {
       ).bind(detected).first() as any
       if (row) {
         companyData = {
-          name: row.name,
-          phone: row.phone,
-          mainDomain: row.mainDomain,
-          color_bg: row.color_bg || '#1A1A2E',
-          color_accent: row.color_accent || '#CC0000',
-          callouts: JSON.parse(row.callouts || '[]'),
-          sitelinks: JSON.parse(row.sitelinks || '[]')
+          name: row.name, phone: row.phone, mainDomain: row.mainDomain,
+          color_bg: row.color_bg || '#1A1A2E', color_accent: row.color_accent || '#CC0000',
+          callouts: JSON.parse(row.callouts || '[]'), sitelinks: JSON.parse(row.sitelinks || '[]')
         }
       }
-    } catch (_) { /* fall through to in-memory */ }
+    } catch (_) {}
   }
-
-  // In-memory fallback (dev / demo — DB unavailable)
   if (!companyData) {
     const c2 = COMPANIES[detected]
     companyData = {
-      name: c2.name,
-      phone: c2.phone,
-      mainDomain: c2.domain,
-      color_bg: (c2 as any).colors?.bg || '#1A1A2E',
-      color_accent: (c2 as any).colors?.accent || '#CC0000',
-      callouts: c2.callouts || [],
-      sitelinks: c2.sitelinks || []
+      name: c2.name, phone: c2.phone, mainDomain: c2.domain,
+      color_bg: (c2 as any).colors?.bg || '#1A1A2E', color_accent: (c2 as any).colors?.accent || '#CC0000',
+      callouts: c2.callouts || [], sitelinks: c2.sitelinks || []
     }
   }
 
-  const html = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo')
-  return c.json({ html, company: detected, brand: companyData.name, domain })
+  // ── Template rotation ──────────────────────────────────────────────────
+  let tplConfig: TemplateConfig = { ...DEFAULT_TEMPLATE }
+  if (c.env?.DB) {
+    try {
+      // 1. Check if domain has a locked template already
+      const domRow = await c.env.DB.prepare(
+        'SELECT id, template FROM domains WHERE domain = ?'
+      ).bind(domain).first() as any
+      let templateNum: number | null = domRow?.template ?? null
+      const domainId: number | null = domRow?.id ?? null
+
+      // 2. No locked template — pick least-used active template
+      if (!templateNum) {
+        const nextTpl = await c.env.DB.prepare(
+          'SELECT template_number FROM lp_templates WHERE active = 1 ORDER BY usage_count ASC, last_used ASC LIMIT 1'
+        ).first() as any
+        templateNum = nextTpl?.template_number ?? 1
+        // Lock this template to the domain for consistency
+        if (domainId && templateNum) {
+          await c.env.DB.prepare('UPDATE domains SET template = ? WHERE id = ?')
+            .bind(templateNum, domainId).run()
+        }
+      }
+
+      // 3. Fetch full template row
+      const tplRow = await c.env.DB.prepare(
+        'SELECT template_number, name, primary_color, accent_color, layout FROM lp_templates WHERE template_number = ?'
+      ).bind(templateNum).first() as any
+
+      if (tplRow) {
+        // 4. Check R2 for hero image — served via /api/images/ proxy
+        const niche = getNiche(detected, service)
+        const nn = String(tplRow.template_number).padStart(2, '0')
+        const slug = (tplRow.name as string).toLowerCase().replace(/\s+/g, '-')
+        const r2Key = `templates/${nn}-${slug}/hero-${niche}.jpg`
+        let heroImageUrl: string | null = null
+        if (c.env?.IMAGES) {
+          try {
+            const obj = await c.env.IMAGES.head(r2Key)
+            if (obj) heroImageUrl = `/api/images/${r2Key}`
+          } catch (_) {}
+        }
+
+        tplConfig = {
+          number: tplRow.template_number,
+          name: tplRow.name,
+          bg: tplRow.primary_color,
+          accent: tplRow.accent_color,
+          layout: tplRow.layout as TemplateLayout,
+          heroImageUrl
+        }
+
+        // 5. Increment usage_count + stamp last_used
+        await c.env.DB.prepare(
+          'UPDATE lp_templates SET usage_count = usage_count + 1, last_used = ? WHERE template_number = ?'
+        ).bind(new Date().toISOString(), templateNum).run()
+      }
+    } catch (_) {}
+  }
+
+  const html = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo', tplConfig)
+  return c.json({ html, company: detected, brand: companyData.name, domain, template: tplConfig.number, templateName: tplConfig.name })
 })
 
 app.post('/api/generate/ads-campaign', async (c) => {
@@ -1495,6 +1716,170 @@ app.get('/api/porkbun/expiry-alerts', async (c) => {
     return c.json({ count: alerts.length, alerts })
   } catch (err: any) {
     return c.json({ error: 'Expiry check failed', detail: err?.message }, 500)
+  }
+})
+
+// ── LP TEMPLATES ─────────────────────────────────────────────────────────
+// GET /api/lp-templates — list all templates with usage stats (super_admin only)
+app.get('/api/lp-templates', async (c) => {
+  const user = c.get('user')
+  if (user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ templates: [] })
+  try {
+    const res = await c.env.DB.prepare(
+      'SELECT template_number, name, primary_color, accent_color, style, layout, best_for, active, usage_count, last_used FROM lp_templates ORDER BY template_number'
+    ).all()
+    return c.json({ templates: res.results })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load templates', detail: err?.message }, 500)
+  }
+})
+
+// PATCH /api/lp-templates/:num/reset — reset usage_count (super_admin only)
+app.patch('/api/lp-templates/:num/reset', async (c) => {
+  const user = c.get('user')
+  if (user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  try {
+    await c.env.DB.prepare(
+      'UPDATE lp_templates SET usage_count = 0, last_used = NULL WHERE template_number = ?'
+    ).bind(Number(c.req.param('num'))).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: 'Reset failed', detail: err?.message }, 500)
+  }
+})
+
+// ── R2 IMAGE SERVING ──────────────────────────────────────────────────────
+// GET /api/images/:key+ — proxy R2 objects (no auth — images appear in LP pages)
+app.get('/api/images/*', async (c) => {
+  if (!c.env?.IMAGES) return c.json({ error: 'Image storage not configured' }, 503)
+  const url = new URL(c.req.url)
+  const key = decodeURIComponent(url.pathname.replace(/^\/api\/images\//, ''))
+  if (!key || key.includes('..') || key.startsWith('/')) return c.json({ error: 'Invalid path' }, 400)
+  try {
+    const obj = await c.env.IMAGES.get(key)
+    if (!obj) return c.json({ error: 'Not found' }, 404)
+    const headers = new Headers()
+    headers.set('Content-Type', obj.httpMetadata?.contentType || 'image/jpeg')
+    headers.set('Cache-Control', 'public, max-age=86400')
+    return new Response(obj.body, { headers })
+  } catch (err: any) {
+    return c.json({ error: 'Image fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/images/upload — upload image to R2 + record in domain_images (super_admin only)
+app.post('/api/images/upload', async (c) => {
+  const user = c.get('user')
+  if (user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.IMAGES) return c.json({ error: 'Image storage not configured' }, 503)
+  try {
+    const fd = await c.req.formData()
+    const file      = fd.get('file') as File | null
+    const domainId  = fd.get('domain_id')  ? Number(fd.get('domain_id'))  : null
+    const tplId     = fd.get('template_id') ? Number(fd.get('template_id')) : null
+    const imageType = (fd.get('image_type') as string) || 'hero'
+    const altText   = (fd.get('alt_text')   as string) || ''
+    const nicheIn   = (fd.get('niche')      as string) || 'restoration'
+
+    if (!file) return c.json({ error: 'No file provided' }, 400)
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp']
+    if (!allowed.includes(file.type)) return c.json({ error: 'Only JPEG, PNG, WebP allowed' }, 400)
+    if (file.size > 5 * 1024 * 1024) return c.json({ error: 'File too large — max 5 MB' }, 400)
+
+    let r2Key = ''
+    let folderPath = ''
+    let niche = nicheIn
+    let companyId: number | null = null
+
+    if (tplId && c.env.DB) {
+      // Template hero image: templates/NN-slug/hero-niche.ext
+      const tplRow = await c.env.DB.prepare(
+        'SELECT template_number, name FROM lp_templates WHERE template_number = ?'
+      ).bind(tplId).first() as any
+      if (tplRow) {
+        const nn   = String(tplRow.template_number).padStart(2, '0')
+        const slug = (tplRow.name as string).toLowerCase().replace(/\s+/g, '-')
+        folderPath = `templates/${nn}-${slug}`
+        r2Key      = `${folderPath}/${imageType}-${niche}.${file.name.split('.').pop() || 'jpg'}`
+      }
+    } else if (domainId && c.env.DB) {
+      // Domain-specific image: domains/domain.tld/type-timestamp.ext
+      const domRow = await c.env.DB.prepare(
+        'SELECT d.domain, d.company, co.id as co_id FROM domains d LEFT JOIN companies co ON d.company = co.key WHERE d.id = ?'
+      ).bind(domainId).first() as any
+      if (domRow) {
+        companyId  = domRow.co_id
+        niche      = getNiche(domRow.company, domRow.company)
+        folderPath = `domains/${domRow.domain}`
+        r2Key      = `${folderPath}/${imageType}-${Date.now()}.${file.name.split('.').pop() || 'jpg'}`
+      }
+    }
+    if (!r2Key) {
+      folderPath = 'uploads'
+      r2Key = `uploads/${imageType}-${Date.now()}.${file.name.split('.').pop() || 'jpg'}`
+    }
+
+    await c.env.IMAGES.put(r2Key, await file.arrayBuffer(), {
+      httpMetadata: { contentType: file.type }
+    })
+
+    const now = new Date().toISOString()
+    if (c.env.DB) {
+      await c.env.DB.prepare(
+        'INSERT INTO domain_images (domain_id, company_id, niche, template_id, image_type, folder_path, filename, r2_key, alt_text, source, approved, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+      ).bind(domainId, companyId, niche, tplId || 0, imageType, folderPath, file.name, r2Key, altText || null, 'uploaded', 0, now).run()
+    }
+
+    return c.json({ success: true, r2Key, url: `/api/images/${r2Key}`, imageType, niche, approved: false })
+  } catch (err: any) {
+    return c.json({ error: 'Upload failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/images/list — list uploaded images for a domain or template (super_admin only)
+app.get('/api/images/list', async (c) => {
+  const user = c.get('user')
+  if (user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ images: [] })
+  try {
+    const domainId  = c.req.query('domain_id')
+    const tplId     = c.req.query('template_id')
+    let rows: any[] = []
+    if (domainId) {
+      const res = await c.env.DB.prepare(
+        'SELECT id, r2_key, image_type, niche, alt_text, approved, created_at FROM domain_images WHERE domain_id = ? ORDER BY created_at DESC LIMIT 50'
+      ).bind(Number(domainId)).all()
+      rows = res.results as any[]
+    } else if (tplId) {
+      const res = await c.env.DB.prepare(
+        'SELECT id, r2_key, image_type, niche, alt_text, approved, created_at FROM domain_images WHERE template_id = ? ORDER BY created_at DESC LIMIT 50'
+      ).bind(Number(tplId)).all()
+      rows = res.results as any[]
+    } else {
+      const res = await c.env.DB.prepare(
+        'SELECT id, r2_key, image_type, niche, alt_text, approved, created_at FROM domain_images ORDER BY created_at DESC LIMIT 100'
+      ).all()
+      rows = res.results as any[]
+    }
+    return c.json({ images: rows.map(r => ({ ...r, url: `/api/images/${r.r2_key}` })) })
+  } catch (err: any) {
+    return c.json({ error: 'List failed', detail: err?.message }, 500)
+  }
+})
+
+// PATCH /api/images/:id/approve — approve an image (super_admin only)
+app.patch('/api/images/:id/approve', async (c) => {
+  const user = c.get('user')
+  if (user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  try {
+    await c.env.DB.prepare('UPDATE domain_images SET approved = 1 WHERE id = ?')
+      .bind(Number(c.req.param('id'))).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: 'Approve failed', detail: err?.message }, 500)
   }
 })
 

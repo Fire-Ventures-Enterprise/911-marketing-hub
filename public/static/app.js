@@ -73,6 +73,7 @@ const SECTION_LABELS = {
   seo:       'SEO Content Generator',
   keywords:  'Keyword Research',
   publish:   'Batch Publish',
+  images:    'Image Library',
   leads:     'Inbound Leads'
 };
 
@@ -91,6 +92,7 @@ function showSection(id) {
   if (id === 'leads')   loadLeads();
   if (id === 'ads')     loadPushHistory();
   if (id === 'publish') initPublishDomains();
+  if (id === 'images')  { loadTemplates(); loadImageLibrary(); _populateImageDomainSelect(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -1122,6 +1124,159 @@ function renderExpiryAlerts(alerts) {
       </div>
     </div>`;
 }
+
+// ── IMAGE UPLOAD ──────────────────────────────────────────────────────────
+
+let _tplFile = null, _domFile = null;
+
+function handleImgFile(input, ctx) {
+  const file = input.files[0];
+  if (!file) return;
+  if (ctx === 'tpl') { _tplFile = file; _previewImg('tpl', file); }
+  else               { _domFile = file; _previewImg('dom', file); }
+}
+function handleImgDrop(e, ctx) {
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (ctx === 'tpl') { _tplFile = file; document.getElementById('tpl-file-input').files = e.dataTransfer.files; _previewImg('tpl', file); }
+  else               { _domFile = file; document.getElementById('dom-file-input').files = e.dataTransfer.files; _previewImg('dom', file); }
+}
+function _previewImg(ctx, file) {
+  const wrap = document.getElementById(`${ctx}-upload-preview`);
+  const img  = document.getElementById(`${ctx}-preview-img`);
+  const nm   = document.getElementById(`${ctx}-preview-name`);
+  wrap.style.display = 'block';
+  img.src = URL.createObjectURL(file);
+  nm.textContent = `${file.name} — ${(file.size/1024).toFixed(0)} KB`;
+}
+
+async function uploadTemplateImage() {
+  const tplId    = document.getElementById('img-tpl-id').value;
+  const niche    = document.getElementById('img-niche').value;
+  const imgType  = document.getElementById('img-type').value;
+  const altText  = document.getElementById('img-alt').value;
+  const statusEl = document.getElementById('tpl-upload-status');
+  if (!_tplFile) { toast('Select an image file first', 'error'); return; }
+  if (!tplId)    { toast('Select a template first', 'error'); return; }
+  statusEl.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('file', _tplFile);
+  fd.append('template_id', tplId);
+  fd.append('image_type', imgType);
+  fd.append('niche', niche);
+  fd.append('alt_text', altText);
+  try {
+    const r = await fetch('/api/images/upload', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` }, body: fd });
+    const d = await r.json();
+    if (!r.ok) { statusEl.textContent = '✗ ' + (d.error || 'Upload failed'); toast(d.error || 'Upload failed', 'error'); return; }
+    statusEl.textContent = `✓ Saved to R2: ${d.r2Key}`;
+    toast(`Uploaded: ${d.r2Key}`, 'success');
+    _tplFile = null;
+    document.getElementById('tpl-upload-preview').style.display = 'none';
+    loadImageLibrary();
+  } catch (err) { statusEl.textContent = '✗ Network error'; toast('Upload failed', 'error'); }
+}
+
+async function uploadDomainImage() {
+  const domainId = document.getElementById('img-domain-id').value;
+  const imgType  = document.getElementById('img-domain-type').value;
+  const altText  = document.getElementById('img-domain-alt').value;
+  const statusEl = document.getElementById('dom-upload-status');
+  if (!_domFile)  { toast('Select an image file first', 'error'); return; }
+  if (!domainId)  { toast('Select a domain first', 'error'); return; }
+  statusEl.textContent = 'Uploading…';
+  const fd = new FormData();
+  fd.append('file', _domFile);
+  fd.append('domain_id', domainId);
+  fd.append('image_type', imgType);
+  fd.append('alt_text', altText);
+  try {
+    const r = await fetch('/api/images/upload', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` }, body: fd });
+    const d = await r.json();
+    if (!r.ok) { statusEl.textContent = '✗ ' + (d.error || 'Upload failed'); toast(d.error || 'Upload failed', 'error'); return; }
+    statusEl.textContent = `✓ Saved to R2: ${d.r2Key}`;
+    toast(`Uploaded: ${d.r2Key}`, 'success');
+    _domFile = null;
+    document.getElementById('dom-upload-preview').style.display = 'none';
+    loadImageLibrary();
+  } catch (err) { statusEl.textContent = '✗ Network error'; toast('Upload failed', 'error'); }
+}
+
+async function loadTemplates() {
+  const grid = document.getElementById('tpl-grid');
+  if (!grid) return;
+  // Templates are seeded in D1 — fetch them from the LP generator's known list
+  // We use the sync-status API as a proxy; templates come from lp_templates
+  try {
+    // Fetch template data via a dedicated query using existing auth
+    const r = await fetch('/api/lp-templates', { headers: { Authorization: `Bearer ${getToken()}` } });
+    if (!r.ok) { grid.innerHTML = '<div style="color:var(--txt3);font-size:13px">Template data via /api/lp-templates — endpoint not yet exposed (add if needed)</div>'; return; }
+    const d = await r.json();
+    grid.innerHTML = (d.templates || []).map(t => `
+      <div class="tpl-card" onclick="selectTplForUpload(${t.template_number})">
+        <div class="tpl-swatch" style="background:linear-gradient(135deg,${t.primary_color},${t.accent_color})"></div>
+        <div class="tpl-name">T${String(t.template_number).padStart(2,'0')} — ${t.name}</div>
+        <div class="tpl-meta">${t.layout} · ${t.best_for}</div>
+        <div class="tpl-usage">Used ${t.usage_count} time${t.usage_count !== 1 ? 's' : ''}</div>
+      </div>`).join('');
+    // Also populate template select
+    const sel = document.getElementById('img-tpl-id');
+    if (sel && d.templates) {
+      sel.innerHTML = '<option value="">— Select Template —</option>' +
+        d.templates.map(t => `<option value="${t.template_number}">T${String(t.template_number).padStart(2,'0')} — ${t.name}</option>`).join('');
+    }
+  } catch { grid.innerHTML = '<div style="color:var(--txt3);font-size:13px">Load failed</div>'; }
+}
+
+function selectTplForUpload(num) {
+  const sel = document.getElementById('img-tpl-id');
+  if (sel) { sel.value = num; document.getElementById('tpl-upload-zone').scrollIntoView({ behavior: 'smooth' }); }
+}
+
+async function loadImageLibrary() {
+  const wrap = document.getElementById('img-library-wrap');
+  if (!wrap) return;
+  try {
+    const r = await fetch('/api/images/list', { headers: { Authorization: `Bearer ${getToken()}` } });
+    const d = await r.json();
+    if (!d.images?.length) { wrap.innerHTML = '<div style="color:var(--txt3);font-size:13px">No images uploaded yet.</div>'; return; }
+    wrap.innerHTML = `<div class="img-preview-wrap">${d.images.map(img => `
+      <div class="img-preview-card">
+        <img src="${img.url}" alt="${img.alt_text || ''}" loading="lazy" onerror="this.style.display='none'">
+        <div class="img-preview-info">
+          <div class="img-preview-key">${img.r2_key}</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
+            <span class="img-preview-badge ${img.approved ? 'approved' : 'pending'}">${img.approved ? '✓ Approved' : '⏳ Pending'}</span>
+            ${!img.approved ? `<button class="btn btn-sec btn-sm" style="padding:2px 8px;font-size:10px" onclick="approveImage(${img.id},this)">Approve</button>` : ''}
+          </div>
+        </div>
+      </div>`).join('')}</div>`;
+  } catch { wrap.innerHTML = '<div style="color:var(--txt3);font-size:13px">Load failed</div>'; }
+}
+
+async function approveImage(id, btn) {
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch(`/api/images/${id}/approve`, { method: 'PATCH', headers: { Authorization: `Bearer ${getToken()}` } });
+    if (r.ok) { toast('Image approved'); loadImageLibrary(); }
+    else { toast('Approve failed', 'error'); btn.disabled = false; btn.textContent = 'Approve'; }
+  } catch { toast('Network error', 'error'); btn.disabled = false; btn.textContent = 'Approve'; }
+}
+
+function loadTplImagePreview() {
+  // Could fetch existing images for selected template — placeholder for future enhancement
+}
+
+// Populate domain dropdown for image upload when images pane is shown
+function _populateImageDomainSelect() {
+  const sel = document.getElementById('img-domain-id');
+  if (!sel || !allDomains) return;
+  sel.innerHTML = '<option value="">— Select Domain —</option>' +
+    allDomains.map(d => `<option value="${d.id}">${d.domain}</option>`).join('');
+}
+
+// Hook into showSection to load data when images pane is shown
+const _origShowSection = typeof showSection === 'function' ? showSection : null;
 
 // ── TOAST ─────────────────────────────────────────────────────────────────
 

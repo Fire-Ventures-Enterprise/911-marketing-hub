@@ -15,6 +15,12 @@
       "id": "40cccfe0b3734c3a8c16300e3300e6aa"
     }
   ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "slm-hub-images"
+    }
+  ],
   // Porkbun API v3 credentials are stored as Cloudflare encrypted secrets.
   // Set via: wrangler pages secret put PORKBUN_API_KEY --project-name services-leads-marketing-hub
   // Do NOT add them to vars — Cloudflare rejects duplicate binding names across secrets + vars.

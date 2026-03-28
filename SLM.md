@@ -29,7 +29,15 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`
+
+### R2 Bucket
+- **Name:** `slm-hub-images`
+- **Binding:** `IMAGES`
+- **Location:** ENAM (East North America)
+- **Image path pattern:** `templates/{NN}-{slug}/hero-{niche}.jpg`
+- **Domain images:** `domains/{domain.tld}/{type}-{timestamp}.jpg`
+- **Served via:** `GET /api/images/{r2_key}` Worker proxy (private bucket, no public URL)
 
 ### KV Namespace
 - **Name:** `Services-Leads-Marketing-Hub-KV`
@@ -72,6 +80,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0006_territory_niche.sql` | Documents `territory` and `niche_angle` columns (added directly to D1 before migration file existed); adds `idx_domains_territory` and `idx_domains_niche_angle` indexes |
 | `migrations/0007_keywords.sql` | Creates `keywords` table + 6 indexes; stores keyword research results linked to domains and companies |
 | `migrations/0008_domain_registrations.sql` | Adds Porkbun sync columns (whois_privacy, security_lock, labels, domain_id, imported_at, updated_at) + 5 indexes to pre-existing `domain_registrations` table |
+| `migrations/0009_template_column.sql` | Adds `template INTEGER DEFAULT NULL` to `domains` table + `idx_domains_template` index — already applied to production on 2026-03-28 |
 
 ---
 
@@ -182,6 +191,25 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Porkbun register endpoint uses both `agreement: "yes"` AND `agreeToTerms: "yes"` to handle API field name ambiguity
 - `GET /api/porkbun/sync-status`, `POST /api/porkbun/import-all`, `POST /api/porkbun/register`, `GET /api/porkbun/expiry-alerts` — all super_admin only
 - Migration table updated to include 0008 — SLM.md tables list: leads, companies, domains, users, sessions, keywords, domain_registrations
+- **15 LP templates** seeded in `lp_templates` D1 table — each has `template_number`, `primary_color`, `accent_color`, `layout`, `style`, `best_for`, `usage_count`, `last_used`, `active`
+- **Template rotation**: `POST /api/generate/landing-page` checks `domains.template` in D1 — if NULL, selects least-used active template (`ORDER BY usage_count ASC, last_used ASC LIMIT 1`), locks it to the domain, increments `usage_count`, stamps `last_used`
+- **Template layouts** (7 variants): `hero-left` (T01, T07, T10), `centered-bold` (T02, T09, T15), `split-screen` (T03, T08, T11), `magazine` (T04, T12), `image-hero` (T05, T14), `magazine-editorial` (T06), `minimal-urgency` (T13)
+- `generateLandingPage` updated signature: `(keyword, service, domain, co, company: CompanyData, mode: 'ppc'|'seo', tpl: TemplateConfig)` — `TemplateConfig` carries number, name, bg, accent, layout, heroImageUrl
+- `DEFAULT_TEMPLATE` constant: T01 Bold Emergency — used as fallback when DB is unavailable
+- Template CSS is layered: `baseCSS` (shared components) + `layoutCSS[layout]` (structural) + `tplOverrides[number]` (visual decorators per template)
+- **R2 bucket `slm-hub-images`** is private (no public URL) — images served via `GET /api/images/{r2_key}` Worker proxy with `Cache-Control: public, max-age=86400`
+- R2 binding in `wrangler.jsonc`: `[[r2_buckets]]` with `binding = "IMAGES"` and `bucket_name = "slm-hub-images"` — also added `IMAGES: R2Bucket` to `Bindings` type in `index.tsx`
+- R2 hero image path: `templates/{NN}-{slug}/hero-{niche}.jpg` — `NN` is zero-padded template number, `slug` is template name lowercased with spaces → hyphens, `niche` is `restoration|renovation|kitchen`
+- If R2 image does not exist for a template: CSS gradient fallback using template colors — no broken images
+- `domain_images` D1 table records all uploaded images: `r2_key`, `image_type`, `niche`, `template_id`, `domain_id`, `alt_text`, `approved`, `source`, `created_at` — `approved = 0` until super admin approves
+- Admin image upload: `POST /api/images/upload` (super_admin only) — accepts multipart form with `file`, `template_id` OR `domain_id`, `image_type`, `niche`, `alt_text`; validates type (JPEG/PNG/WebP) and size (max 5MB); stores in R2 + records in `domain_images`
+- `GET /api/images/list` returns all uploaded images with their proxied `/api/images/` URL — filterable by `?domain_id=` or `?template_id=`
+- `PATCH /api/images/:id/approve` sets `approved = 1` on a `domain_images` row
+- `GET /api/lp-templates` exposes full template list to admin dashboard (super_admin only)
+- `PATCH /api/lp-templates/:num/reset` resets `usage_count = 0, last_used = NULL` for a template
+- Admin sidebar now has "Images" pane with: template hero upload (by template + niche), domain image upload (by domain + type), template browser with color swatches + usage counts, image library with approval workflow
+- `domains.template` column added (0009): `INTEGER DEFAULT NULL` — NULL means rotation will assign next template; set by endpoint after first generation; admin can override by setting directly in D1
+- **Template locking**: once a domain gets a template assigned, it always serves that template for consistency — prevents jarring changes for repeat visitors
 
 ---
 

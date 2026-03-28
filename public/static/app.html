@@ -264,6 +264,30 @@
     .expiry-alert { display:flex; align-items:center; gap:10px; padding:8px 14px; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); border-radius:8px; margin-bottom:6px; font-size:12px; flex-wrap:wrap; }
     .expiry-badge { padding:2px 8px; border-radius:10px; font-size:10px; font-weight:700; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); white-space:nowrap; }
 
+    /* ── IMAGE UPLOAD ── */
+    .img-upload-zone { border:2px dashed var(--bd2); border-radius:12px; padding:36px 24px; text-align:center; cursor:pointer; transition:border-color .15s,background .15s; background:var(--bg-s); }
+    .img-upload-zone:hover,.img-upload-zone.drag { border-color:var(--ac); background:rgba(59,130,246,0.05); }
+    .img-upload-zone input[type=file] { display:none; }
+    .img-upload-icon { font-size:36px; margin-bottom:10px; }
+    .img-upload-label { font-size:14px; color:var(--txt2); margin-bottom:4px; }
+    .img-upload-hint { font-size:12px; color:var(--txt3); }
+    .img-preview-wrap { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-top:16px; }
+    .img-preview-card { border:1px solid var(--bd); border-radius:8px; overflow:hidden; background:var(--bg-c); }
+    .img-preview-card img { width:100%; aspect-ratio:16/9; object-fit:cover; display:block; }
+    .img-preview-info { padding:8px 10px; font-size:11px; }
+    .img-preview-key { color:var(--txt3); font-family:monospace; word-break:break-all; }
+    .img-preview-badge { display:inline-block; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:700; margin-top:4px; }
+    .img-preview-badge.pending { background:rgba(245,158,11,.15); color:#f59e0b; border:1px solid rgba(245,158,11,.3); }
+    .img-preview-badge.approved { background:rgba(74,222,128,.15); color:#4ade80; border:1px solid rgba(74,222,128,.3); }
+    .tpl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
+    .tpl-card { border:1px solid var(--bd); border-radius:8px; padding:14px; cursor:pointer; transition:border-color .15s; }
+    .tpl-card:hover { border-color:var(--ac); }
+    .tpl-card.selected { border-color:var(--ac); background:rgba(59,130,246,.06); }
+    .tpl-swatch { height:32px; border-radius:5px; margin-bottom:8px; }
+    .tpl-name { font-size:13px; font-weight:700; margin-bottom:2px; }
+    .tpl-meta { font-size:11px; color:var(--txt3); }
+    .tpl-usage { font-size:11px; color:var(--txt2); margin-top:4px; }
+
     .role-badge {
       font-size: 10px;
       font-weight: 700;
@@ -620,6 +644,9 @@
       <button class="nav-item" data-section="publish" onclick="showSection('publish')">
         <span class="nav-icon">🚀</span><span>Batch Publish</span>
       </button>
+      <button class="nav-item" data-section="images" onclick="showSection('images')">
+        <span class="nav-icon">🖼️</span><span>Images</span>
+      </button>
 
       <div class="sb-group">CRM</div>
       <button class="nav-item" data-section="leads" onclick="showSection('leads')">
@@ -964,6 +991,135 @@
         <div class="card">
           <div class="card-hd"><div class="card-title">Recent Leads</div></div>
           <div id="leads-list"><p style="color:var(--tx3);text-align:center;padding:24px">Loading leads…</p></div>
+        </div>
+      </div>
+
+      <!-- ── IMAGES ── -->
+      <div class="pane" id="pane-images">
+        <div class="ph"><h2>🖼️ Image Library</h2><p>Upload hero images for templates and domains — stored in R2, served via /api/images/</p></div>
+
+        <!-- Template Image Upload -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-hd">
+            <div class="card-title">Upload Template Hero Image</div>
+            <div class="card-actions">
+              <span style="font-size:12px;color:var(--txt3)">Path: templates/NN-name/hero-niche.jpg</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+            <div>
+              <label class="form-label">Template</label>
+              <select class="form-input" id="img-tpl-id" onchange="loadTplImagePreview()">
+                <option value="">— Select Template —</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Niche</label>
+              <select class="form-input" id="img-niche">
+                <option value="restoration">restoration</option>
+                <option value="renovation">renovation</option>
+                <option value="kitchen">kitchen</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Image Type</label>
+              <select class="form-input" id="img-type">
+                <option value="hero">hero</option>
+                <option value="gallery">gallery</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom:14px">
+            <label class="form-label">Alt Text</label>
+            <input class="form-input" id="img-alt" type="text" placeholder="e.g. Water damage restoration Ottawa — emergency response">
+          </div>
+          <div class="img-upload-zone" id="tpl-upload-zone" onclick="document.getElementById('tpl-file-input').click()"
+               ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')"
+               ondrop="event.preventDefault();this.classList.remove('drag');handleImgDrop(event,'tpl')">
+            <input type="file" id="tpl-file-input" accept="image/jpeg,image/png,image/webp" onchange="handleImgFile(this,'tpl')">
+            <div class="img-upload-icon">📁</div>
+            <div class="img-upload-label">Click or drag &amp; drop image here</div>
+            <div class="img-upload-hint">JPEG, PNG, or WebP — max 5 MB — recommended 1920×1080</div>
+          </div>
+          <div id="tpl-upload-preview" style="margin-top:14px;display:none">
+            <img id="tpl-preview-img" style="max-height:180px;border-radius:8px;border:1px solid var(--bd)">
+            <div id="tpl-preview-name" style="font-size:12px;color:var(--txt3);margin-top:6px"></div>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+            <button class="btn btn-primary" onclick="uploadTemplateImage()">⬆ Upload to R2</button>
+            <span id="tpl-upload-status" style="font-size:13px;color:var(--txt2)"></span>
+          </div>
+        </div>
+
+        <!-- Domain Image Upload -->
+        <div class="card" style="margin-bottom:20px">
+          <div class="card-hd">
+            <div class="card-title">Upload Domain Image</div>
+            <div class="card-actions">
+              <span style="font-size:12px;color:var(--txt3)">Path: domains/domain.tld/type-timestamp.jpg</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div>
+              <label class="form-label">Domain</label>
+              <select class="form-input" id="img-domain-id">
+                <option value="">— Select Domain —</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Image Type</label>
+              <select class="form-input" id="img-domain-type">
+                <option value="hero">hero</option>
+                <option value="before">before</option>
+                <option value="after">after</option>
+                <option value="gallery">gallery</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-bottom:14px">
+            <label class="form-label">Alt Text</label>
+            <input class="form-input" id="img-domain-alt" type="text" placeholder="Describe the image for SEO and accessibility">
+          </div>
+          <div class="img-upload-zone" id="dom-upload-zone" onclick="document.getElementById('dom-file-input').click()"
+               ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')"
+               ondrop="event.preventDefault();this.classList.remove('drag');handleImgDrop(event,'dom')">
+            <input type="file" id="dom-file-input" accept="image/jpeg,image/png,image/webp" onchange="handleImgFile(this,'dom')">
+            <div class="img-upload-icon">🏠</div>
+            <div class="img-upload-label">Click or drag &amp; drop image here</div>
+            <div class="img-upload-hint">JPEG, PNG, or WebP — max 5 MB</div>
+          </div>
+          <div id="dom-upload-preview" style="margin-top:14px;display:none">
+            <img id="dom-preview-img" style="max-height:180px;border-radius:8px;border:1px solid var(--bd)">
+            <div id="dom-preview-name" style="font-size:12px;color:var(--txt3);margin-top:6px"></div>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+            <button class="btn btn-primary" onclick="uploadDomainImage()">⬆ Upload to R2</button>
+            <span id="dom-upload-status" style="font-size:13px;color:var(--txt2)"></span>
+          </div>
+        </div>
+
+        <!-- Template Browser -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">🎨 15 Templates — Usage Overview</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="loadTemplates()">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="tpl-grid" id="tpl-grid">
+            <div style="color:var(--txt3);font-size:13px;grid-column:1/-1">Loading templates…</div>
+          </div>
+        </div>
+
+        <!-- Image Library -->
+        <div class="card" style="margin-top:20px">
+          <div class="card-hd">
+            <div class="card-title">📂 Uploaded Images</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="loadImageLibrary()">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="img-library-wrap" style="color:var(--txt3);font-size:13px">No images uploaded yet.</div>
         </div>
       </div>
 
