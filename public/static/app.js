@@ -1,116 +1,231 @@
-// 911 Marketing Hub — app.js v2.0
-// Frontend logic for the 7-tab Marketing Hub
-// Tab navigation, API calls, generators
+// Services Leads Marketing Hub — app.js v3.0
+// Sidebar nav, light/dark mode, D1-driven company data
 
-let allDomains = [];
-let lastLpHtml = '';
-let lastAdsCampaign = null;
-let lastSeoContent = null;
+let allDomains   = [];
+let allCompanies = [];
+let lastLpHtml       = '';
+let lastAdsCampaign  = null;
+let lastSeoContent   = null;
 
-function showTab(id, el) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
-  document.getElementById('pane-' + id).classList.add('active');
-  el.classList.add('active');
-  if (id === 'leads') loadLeads();
-  if (id === 'ads') loadPushHistory();
-  if (id === 'publish') initPublishDomains();
+// ── THEME ─────────────────────────────────────────────────────────────────
+
+function initTheme() {
+  const saved = localStorage.getItem('slm-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  _updateThemeBtn(saved);
 }
 
-// Load domains
+function toggleTheme() {
+  const cur  = document.documentElement.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('slm-theme', next);
+  _updateThemeBtn(next);
+}
+
+function _updateThemeBtn(theme) {
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────────────────
+
+const SECTION_LABELS = {
+  dashboard: 'Dashboard',
+  domains:   'Domain Army',
+  landing:   'Landing Page Generator',
+  ads:       'Google Ads Generator',
+  seo:       'SEO Content Generator',
+  publish:   'Batch Publish',
+  leads:     'Inbound Leads'
+};
+
+function showSection(id) {
+  document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+  const pane = document.getElementById('pane-' + id);
+  if (pane) pane.classList.add('active');
+
+  document.querySelectorAll('.nav-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.section === id);
+  });
+
+  const titleEl = document.getElementById('tb-title');
+  if (titleEl) titleEl.textContent = SECTION_LABELS[id] || id;
+
+  if (id === 'leads')   loadLeads();
+  if (id === 'ads')     loadPushHistory();
+  if (id === 'publish') initPublishDomains();
+
+  if (window.innerWidth <= 768) closeSidebar();
+}
+
+// ── SIDEBAR MOBILE ────────────────────────────────────────────────────────
+
+function toggleSidebar() {
+  const sb  = document.getElementById('sidebar');
+  const ov  = document.getElementById('sb-overlay');
+  if (sb.classList.contains('open')) {
+    closeSidebar();
+  } else {
+    sb.classList.add('open');
+    ov.classList.add('open');
+  }
+}
+
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sb-overlay').classList.remove('open');
+}
+
+// ── COMPANIES (from D1) ───────────────────────────────────────────────────
+
+async function loadCompanies() {
+  try {
+    const r = await fetch('/api/companies');
+    const { companies } = await r.json();
+    allCompanies = companies || [];
+    _populateCompanySelects();
+    _renderDashboardCompanies();
+  } catch(e) {
+    console.warn('Could not load companies:', e.message);
+  }
+}
+
+function _populateCompanySelects() {
+  ['lp-company', 'ads-company', 'seo-company'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    while (el.options.length > 1) el.remove(1);
+    allCompanies.forEach(co => {
+      const opt = document.createElement('option');
+      opt.value       = co.key;
+      opt.textContent = co.name;
+      el.appendChild(opt);
+    });
+  });
+}
+
+function _renderDashboardCompanies() {
+  const el = document.getElementById('dash-companies');
+  if (!el || !allCompanies.length) return;
+
+  const countByKey = {};
+  allDomains.forEach(d => { countByKey[d.co] = (countByKey[d.co] || 0) + 1; });
+
+  el.innerHTML = allCompanies.map(co => {
+    const accent = co.color_accent || '#CC0000';
+    const count  = countByKey[co.key] || 0;
+    return `<div class="co-card" style="--ca:${accent}">
+      <div class="co-name">${co.name}</div>
+      <div class="co-meta">
+        ${count} domains &middot; ${co.phone}<br>
+        $${co.budget}/day &middot; Target CPA $${co.target_cpa}<br>
+        <a href="https://${co.domain}" target="_blank">${co.domain}</a>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── DOMAINS ───────────────────────────────────────────────────────────────
+
 async function loadDomains() {
   try {
     const r = await fetch('/api/domains');
-    const { domains } = await r.json();
-    allDomains = domains;
-    renderDomains(domains);
+    const data = await r.json();
+    allDomains = data.domains || [];
+    renderDomains(allDomains);
+    _updateDashStats();
+    if (allCompanies.length) _renderDashboardCompanies();
   } catch(e) {
-    document.getElementById('domains-tbody').innerHTML = '<tr><td colspan="8" style="text-align:center;color:#71717A;padding:20px">Error loading domains: ' + e.message + '</td></tr>';
+    const tbody = document.getElementById('domains-tbody');
+    if (tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--tx3);padding:20px">Error: ${e.message}</td></tr>`;
   }
+}
+
+function _updateDashStats() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('dash-total',    allDomains.length);
+  set('dash-active',   allDomains.filter(d => d.status === 'Active').length);
+  set('dash-building', allDomains.filter(d => d.status === 'Building').length);
+  set('dash-parked',   allDomains.filter(d => d.status === 'Parked').length);
 }
 
 function renderDomains(domains) {
   const tbody = document.getElementById('domains-tbody');
   if (!domains || !domains.length) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#71717A;padding:20px">No domains found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--tx3);padding:20px">No domains found.</td></tr>';
     return;
   }
+  const esc = s => String(s).replace(/'/g, "\\'");
   tbody.innerHTML = domains.map(d => {
-    const catClass = d.category === 'emergency' ? 'pill-emergency' : d.category === 'renovation' ? 'pill-renovation' : 'pill-kitchen';
-    const statusClass = d.status === 'Active' ? 'pill-active' : d.status === 'Building' ? 'pill-building' : 'pill-parked';
-    const prioClass = 'p' + d.priority;
-    return '<tr onclick="fillFromDomain(\'' + d.domain + '\',\'' + d.keyword + '\',\'' + d.service + '\',\'' + d.co + '\')" style="cursor:pointer">' +
-      '<td><strong>' + d.domain + '</strong></td>' +
-      '<td style="color:#71717A">' + d.keyword + '</td>' +
-      '<td>' + d.service + '</td>' +
-      '<td><span class="pill ' + catClass + '">' + d.co + '</span></td>' +
-      '<td style="color:#4ade80">$' + d.budget + '/day</td>' +
-      '<td><span class="pill ' + statusClass + '">' + d.status + '</span></td>' +
-      '<td class="' + prioClass + '">' + d.priority + '</td>' +
-      '<td>' +
-        '<button class="qf qf-lp" onclick="event.stopPropagation();fillLP(\'' + d.domain + '\',\'' + d.keyword + '\',\'' + d.service + '\',\'' + d.co + '\')">LP</button>' +
-        '<button class="qf qf-ads" onclick="event.stopPropagation();fillAds(\'' + d.domain + '\',\'' + d.keyword + '\',\'' + d.service + '\',\'' + d.co + '\')">ADS</button>' +
-      '</td></tr>';
+    const cat    = d.category === 'emergency' ? 'pill-emergency' : d.category === 'renovation' ? 'pill-renovation' : 'pill-kitchen';
+    const status = d.status === 'Active' ? 'pill-active' : d.status === 'Building' ? 'pill-building' : 'pill-parked';
+    return `<tr onclick="fillFromDomain('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')" style="cursor:pointer">
+      <td><strong>${d.domain}</strong></td>
+      <td style="color:var(--tx3)">${d.keyword}</td>
+      <td>${d.service}</td>
+      <td><span class="pill ${cat}">${d.co}</span></td>
+      <td style="color:#4ade80">$${d.budget}/day</td>
+      <td><span class="pill ${status}">${d.status}</span></td>
+      <td class="p${d.priority}">${d.priority}</td>
+      <td>
+        <button class="qf qf-lp"  onclick="event.stopPropagation();fillLP('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">LP</button>
+        <button class="qf qf-ads" onclick="event.stopPropagation();fillAds('${esc(d.domain)}','${esc(d.keyword)}','${esc(d.service)}','${esc(d.co)}')">ADS</button>
+      </td>
+    </tr>`;
   }).join('');
 }
 
 function filterDomains(filter, el) {
-  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.ftab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  let filtered = allDomains;
-  if (['emergency','renovation','kitchen'].includes(filter)) {
-    filtered = allDomains.filter(d => d.category === filter);
-  } else if (filter !== 'all') {
-    filtered = allDomains.filter(d => d.status === filter);
-  }
+  const filtered = filter === 'all' ? allDomains
+    : ['emergency','renovation','kitchen'].includes(filter)
+      ? allDomains.filter(d => d.category === filter)
+      : allDomains.filter(d => d.status === filter);
   renderDomains(filtered);
 }
 
 function fillFromDomain(domain, keyword, service, co) {
-  ['lp','ads','seo'].forEach(prefix => {
-    document.getElementById(prefix+'-domain').value = domain;
-    document.getElementById(prefix+'-keyword').value = keyword;
-    document.getElementById(prefix+'-service').value = service;
-    document.getElementById(prefix+'-company').value = co;
+  ['lp','ads','seo'].forEach(p => {
+    document.getElementById(p+'-domain').value  = domain;
+    document.getElementById(p+'-keyword').value = keyword;
+    document.getElementById(p+'-service').value = service;
+    document.getElementById(p+'-company').value = co;
   });
-  showTabByName('landing');
+  showSection('landing');
   toast('Fields filled from: ' + domain);
 }
 
 function fillLP(domain, keyword, service, co) {
-  document.getElementById('lp-domain').value = domain;
+  document.getElementById('lp-domain').value  = domain;
   document.getElementById('lp-keyword').value = keyword;
   document.getElementById('lp-service').value = service;
   document.getElementById('lp-company').value = co;
-  showTabByName('landing');
+  showSection('landing');
 }
 
 function fillAds(domain, keyword, service, co) {
-  document.getElementById('ads-domain').value = domain;
+  document.getElementById('ads-domain').value  = domain;
   document.getElementById('ads-keyword').value = keyword;
   document.getElementById('ads-service').value = service;
   document.getElementById('ads-company').value = co;
-  showTabByName('ads');
+  showSection('ads');
 }
 
-function showTabByName(name) {
-  const tabs = ['domains','landing','ads','seo','publish','leads','dashboard'];
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    const active = tabs[i] === name;
-    t.classList.toggle('active', active);
-    document.getElementById('pane-' + tabs[i]).classList.toggle('active', active);
-  });
-}
+// ── LANDING PAGE GENERATOR ────────────────────────────────────────────────
 
-// Landing Page Generator
 async function generateLP() {
   const keyword = document.getElementById('lp-keyword').value;
   const service = document.getElementById('lp-service').value;
-  const domain = document.getElementById('lp-domain').value;
+  const domain  = document.getElementById('lp-domain').value;
   const company = document.getElementById('lp-company').value;
   if (!keyword || !service || !domain) { toast('Fill keyword, service & domain', 'error'); return; }
-  document.getElementById('lp-output').textContent = 'Generating...';
-  const r = await fetch('/api/generate/landing-page', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({keyword,service,domain,company}) });
+  document.getElementById('lp-output').textContent = 'Generating…';
+  const r = await fetch('/api/generate/landing-page', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({keyword, service, domain, company})
+  });
   const d = await r.json();
   lastLpHtml = d.html;
   document.getElementById('lp-output').textContent = d.html;
@@ -132,20 +247,27 @@ function previewLP() {
 async function deployLP() {
   const domain = document.getElementById('lp-domain').value;
   if (!lastLpHtml || !domain) { toast('Generate first', 'error'); return; }
-  const r = await fetch('/api/deploy/landing-page', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({domain,html:lastLpHtml}) });
+  const r = await fetch('/api/deploy/landing-page', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({domain, html: lastLpHtml})
+  });
   const d = await r.json();
   toast(d.message || 'Deployed!');
 }
 
-// Ads Generator
+// ── ADS GENERATOR ─────────────────────────────────────────────────────────
+
 async function generateAds() {
-  const domain = document.getElementById('ads-domain').value;
+  const domain  = document.getElementById('ads-domain').value;
   const service = document.getElementById('ads-service').value;
   const keyword = document.getElementById('ads-keyword').value;
   const company = document.getElementById('ads-company').value;
   if (!domain || !service || !keyword) { toast('Fill all fields', 'error'); return; }
-  document.getElementById('ads-output').textContent = 'Generating...';
-  const r = await fetch('/api/generate/ads-campaign', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({domain,service,keyword,company}) });
+  document.getElementById('ads-output').textContent = 'Generating…';
+  const r = await fetch('/api/generate/ads-campaign', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({domain, service, keyword, company})
+  });
   lastAdsCampaign = await r.json();
   document.getElementById('ads-output').textContent = JSON.stringify(lastAdsCampaign, null, 2);
   toast('Generated for ' + lastAdsCampaign.company);
@@ -159,7 +281,10 @@ function copyAds() {
 
 async function pushAds(dryRun) {
   if (!lastAdsCampaign) { toast('Generate first', 'error'); return; }
-  const r = await fetch('/api/google-ads/push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...lastAdsCampaign, dry_run: dryRun}) });
+  const r = await fetch('/api/google-ads/push', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({...lastAdsCampaign, dry_run: dryRun})
+  });
   const d = await r.json();
   document.getElementById('ads-output').textContent = JSON.stringify(d, null, 2);
   toast(d.message || d.error);
@@ -170,7 +295,7 @@ async function checkGoogleAuth() {
   const r = await fetch('/api/auth/google/status');
   const d = await r.json();
   document.getElementById('oauth-status').innerHTML = d.connected
-    ? '<span style="color:#4ade80">Connected — ' + Math.round(d.expires_in_seconds/60) + ' mins remaining</span>'
+    ? `<span style="color:#4ade80">Connected — ${Math.round(d.expires_in_seconds/60)} mins remaining</span>`
     : '<span style="color:#f87171">Not connected</span>';
 }
 
@@ -178,32 +303,49 @@ async function loadPushHistory() {
   const r = await fetch('/api/google-ads/history');
   const { history } = await r.json();
   const el = document.getElementById('push-history');
-  if (!history || !history.length) { el.innerHTML = '<p style="color:#71717A;font-size:13px">No history yet.</p>'; return; }
+  if (!history || !history.length) {
+    el.innerHTML = '<p style="color:var(--tx3);font-size:13px">No history yet.</p>';
+    return;
+  }
   el.innerHTML = history.map(h =>
-    '<div style="padding:8px 0;border-bottom:1px solid #1a1a1a;font-size:13px">' +
-    '<span style="color:' + (h.status==='demo'?'#f59e0b':'#4ade80') + '">' + (h.status==='demo'?'Demo':'Live') + '</span> ' +
-    '<strong>' + h.campaign + '</strong> ' +
-    '<span style="color:#71717A">' + new Date(h.ts).toLocaleString() + '</span></div>'
+    `<div style="padding:8px 0;border-bottom:1px solid var(--bd);font-size:13px">
+      <span style="color:${h.status==='demo'?'#F59E0B':'#4ade80'};font-weight:700">${h.status==='demo'?'Demo':'Live'}</span>
+      &nbsp;<strong style="color:var(--tx)">${h.campaign}</strong>
+      &nbsp;<span style="color:var(--tx3)">${new Date(h.ts).toLocaleString()}</span>
+    </div>`
   ).join('');
 }
 
-// SEO Generator
+// ── SEO GENERATOR ─────────────────────────────────────────────────────────
+
 async function generateSEO() {
-  const domain = document.getElementById('seo-domain').value;
+  const domain  = document.getElementById('seo-domain').value;
   const keyword = document.getElementById('seo-keyword').value;
   const service = document.getElementById('seo-service').value;
   const company = document.getElementById('seo-company').value;
   if (!domain || !keyword || !service) { toast('Fill all fields', 'error'); return; }
-  document.getElementById('seo-output').innerHTML = '<p style="color:#71717A;padding:20px">Generating...</p>';
-  const r = await fetch('/api/generate/seo-content', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({domain,keyword,service,company}) });
+  document.getElementById('seo-output').innerHTML = '<p style="color:var(--tx3);padding:20px">Generating…</p>';
+  const r = await fetch('/api/generate/seo-content', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({domain, keyword, service, company})
+  });
   lastSeoContent = await r.json();
+  const s = lastSeoContent;
   document.getElementById('seo-output').innerHTML =
-    '<div class="card"><h3>Title</h3><p style="color:#a8ff78;font-family:monospace;margin-top:8px">' + lastSeoContent.title + '</p></div>' +
-    '<div class="card"><h3>Meta Description</h3><p style="color:#a8ff78;font-family:monospace;margin-top:8px">' + lastSeoContent.metaDesc + '</p></div>' +
-    '<div class="card"><h3>FAQs (' + lastSeoContent.faqs.length + ')</h3>' + lastSeoContent.faqs.map(f => '<div style="margin-top:10px"><strong>' + f.question + '</strong><p style="color:#71717A;font-size:13px;margin-top:4px">' + f.answer + '</p></div>').join('') + '</div>' +
-    '<div class="card"><h3>JSON-LD Schema</h3><pre>' + JSON.stringify(lastSeoContent.schema, null, 2) + '</pre></div>' +
-    '<div class="card"><h3>Article</h3><pre style="color:#e2e8f0">' + lastSeoContent.article + '</pre></div>';
-  toast('SEO generated for ' + lastSeoContent.brand);
+    `<div class="card"><div class="card-hd"><div class="card-title">Title Tag</div></div>
+      <p style="color:var(--out-tx);font-family:monospace;font-size:13px">${s.title}</p></div>` +
+    `<div class="card"><div class="card-hd"><div class="card-title">Meta Description</div></div>
+      <p style="color:var(--out-tx);font-family:monospace;font-size:13px">${s.metaDesc}</p></div>` +
+    `<div class="card"><div class="card-hd"><div class="card-title">FAQs (${s.faqs.length})</div></div>
+      ${s.faqs.map(f => `<div style="margin-bottom:12px">
+        <div style="font-weight:700;color:var(--tx)">${f.question}</div>
+        <div style="color:var(--tx3);font-size:13px;margin-top:3px">${f.answer}</div>
+      </div>`).join('')}</div>` +
+    `<div class="card"><div class="card-hd"><div class="card-title">JSON-LD Schema</div></div>
+      <pre style="color:var(--out-tx);font-family:monospace;font-size:12px;overflow:auto">${JSON.stringify(s.schema, null, 2)}</pre></div>` +
+    `<div class="card"><div class="card-hd"><div class="card-title">Article</div></div>
+      <pre style="color:var(--tx2);font-family:monospace;font-size:12px;white-space:pre-wrap">${s.article}</pre></div>`;
+  toast('SEO generated for ' + s.brand);
 }
 
 function copySEO() {
@@ -212,40 +354,72 @@ function copySEO() {
   toast('Copied!');
 }
 
-// Leads
+// ── LEADS ─────────────────────────────────────────────────────────────────
+
 async function loadLeads() {
   const r = await fetch('/api/leads');
   const { leads, message } = await r.json();
+
   if (message) {
-    document.getElementById('leads-list').innerHTML = '<div style="background:#1c1d07;border:1px solid #333;border-radius:8px;padding:20px;text-align:center"><p style="color:#fde68a;margin-bottom:8px">Demo Mode</p><p style="color:#71717A;font-size:13px">' + message + '</p></div>';
-    ['leads-total','leads-restoration','leads-renovation','leads-kitchen','dash-leads'].forEach(id => { const el = document.getElementById(id); if(el) el.textContent = '-'; });
+    document.getElementById('leads-list').innerHTML =
+      `<div style="background:var(--bg-s);border:1px solid var(--bd);border-radius:8px;padding:24px;text-align:center">
+        <p style="color:#fde68a;font-weight:700;margin-bottom:6px">Demo Mode</p>
+        <p style="color:var(--tx3);font-size:13px">${message}</p>
+      </div>`;
+    _renderLeadsStats([]);
+    const el = document.getElementById('dash-leads');
+    if (el) el.textContent = '0';
     return;
   }
-  const byC = { Restoration:0, Renovation:0, Kitchen:0 };
-  leads.forEach(l => { if(byC[l.company]!==undefined) byC[l.company]++; });
-  const setEl = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val; };
-  setEl('leads-total', leads.length);
-  setEl('leads-restoration', byC.Restoration);
-  setEl('leads-renovation', byC.Renovation);
-  setEl('leads-kitchen', byC.Kitchen);
-  setEl('dash-leads', leads.length);
-  document.getElementById('leads-list').innerHTML = leads.slice(0,50).map(l =>
-    '<div class="lead-row">' +
-    '<div style="font-size:22px">' + (l.company==='Restoration'?'🚨':l.company==='Renovation'?'🔨':'🍳') + '</div>' +
-    '<div style="flex:1"><div style="font-weight:700">' + (l.name||'Anonymous') + ' — ' + (l.phone||l.email) + '</div>' +
-    '<div style="color:#71717A;font-size:12px">' + l.source + ' · ' + new Date(l.timestamp).toLocaleString() + '</div></div>' +
-    '</div>'
-  ).join('') || '<p style="color:#71717A;text-align:center;padding:20px">No leads yet.</p>';
+
+  const dashEl = document.getElementById('dash-leads');
+  if (dashEl) dashEl.textContent = leads.length;
+
+  _renderLeadsStats(leads);
+
+  document.getElementById('leads-list').innerHTML = leads.slice(0, 50).map(l => {
+    const co     = allCompanies.find(c => c.key === l.company);
+    const accent = co ? co.color_accent : '#64748b';
+    const initial = l.company ? l.company[0] : '?';
+    return `<div class="lead-row">
+      <div class="lead-ico" style="background:${accent}22;color:${accent}">${initial}</div>
+      <div>
+        <div class="lead-name">${l.name || 'Anonymous'} &mdash; ${l.phone || l.email || '—'}</div>
+        <div class="lead-meta">${l.source || 'direct'} &middot; ${l.company || '—'} &middot; ${new Date(l.timestamp).toLocaleString()}</div>
+      </div>
+    </div>`;
+  }).join('') || '<p style="color:var(--tx3);text-align:center;padding:24px">No leads yet.</p>';
 }
 
-// Publish batch
+function _renderLeadsStats(leads) {
+  const statsEl = document.getElementById('leads-stats');
+  if (!statsEl) return;
+  const byKey = {};
+  leads.forEach(l => { byKey[l.company] = (byKey[l.company] || 0) + 1; });
+
+  const coStats = allCompanies.map(co =>
+    `<div class="stat-card" style="--sa:${co.color_accent || '#CC0000'}">
+      <div class="stat-num">${byKey[co.key] || 0}</div>
+      <div class="stat-label">${co.name}</div>
+    </div>`
+  ).join('');
+
+  statsEl.innerHTML =
+    `<div class="stat-card" style="--sa:#4ade80">
+      <div class="stat-num" id="leads-total">${leads.length}</div>
+      <div class="stat-label">Total Leads</div>
+    </div>${coStats}`;
+}
+
+// ── BATCH PUBLISH ─────────────────────────────────────────────────────────
+
 function initPublishDomains() {
   if (!allDomains.length) { setTimeout(initPublishDomains, 500); return; }
   document.getElementById('publish-domains').innerHTML = allDomains.map(d =>
-    '<label class="domain-check">' +
-    '<input type="checkbox" value="' + d.domain + '" data-keyword="' + d.keyword + '" data-service="' + d.service + '" data-co="' + d.co + '">' +
-    '<span><strong>' + d.domain + '</strong><span style="color:#71717A;font-size:11px;display:block">' + d.co + ' · ' + d.status + '</span></span>' +
-    '</label>'
+    `<label class="dcheck">
+      <input type="checkbox" value="${d.domain}" data-keyword="${d.keyword}" data-service="${d.service}" data-co="${d.co}">
+      <div><strong>${d.domain}</strong><span>${d.co} &middot; ${d.status}</span></div>
+    </label>`
   ).join('');
 }
 
@@ -258,45 +432,47 @@ async function publishBatch(action) {
   if (!checked.length) { toast('Select at least one domain', 'error'); return; }
   const prog = document.getElementById('publish-progress');
   const fill = document.getElementById('pub-progress');
-  const log = document.getElementById('pub-log');
+  const log  = document.getElementById('pub-log');
   prog.style.display = 'block';
-  log.innerHTML = '';
+  log.textContent = '';
   let done = 0;
-  const addLog = msg => { log.innerHTML += msg + '\n'; log.scrollTop = log.scrollHeight; };
+  const addLog = msg => { log.textContent += msg + '\n'; log.scrollTop = log.scrollHeight; };
+
   for (const inp of checked) {
-    const domain = inp.value, kw = inp.dataset.keyword, svc = inp.dataset.service, co = inp.dataset.co;
+    const { value: domain, dataset: { keyword: kw, service: svc, co } } = inp;
     done++;
-    fill.style.width = Math.round((done/checked.length)*100) + '%';
+    fill.style.width = Math.round((done / checked.length) * 100) + '%';
     try {
       if (action === 'lp') {
         const r = await fetch('/api/generate/landing-page', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keyword:kw,service:svc,domain,company:co})});
         const d = await r.json();
-        addLog('LP: ' + domain + ' (' + d.brand + ')');
+        addLog('✓ LP: ' + domain + ' (' + d.brand + ')');
       } else if (action === 'ads') {
         const r = await fetch('/api/generate/ads-campaign', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,service:svc,keyword:kw,company:co})});
         const d = await r.json();
-        addLog('Ads: ' + d.campaign.name);
+        addLog('✓ Ads: ' + d.campaign.name);
       } else if (action === 'seo') {
         await fetch('/api/generate/seo-content', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({domain,keyword:kw,service:svc,company:co})});
-        addLog('SEO: ' + domain);
+        addLog('✓ SEO: ' + domain);
       } else {
-        addLog('Queued: ' + domain + ' (demo mode)');
+        addLog('→ Queued: ' + domain + ' (demo mode)');
       }
     } catch(e) {
-      addLog('Error: ' + domain + ' - ' + e.message);
+      addLog('✗ Error: ' + domain + ' — ' + e.message);
     }
   }
-  addLog('\nDone! ' + checked.length + ' domains processed.');
+  addLog('\n✅ Done! ' + checked.length + ' domains processed.');
   toast(checked.length + ' domains processed');
 }
 
-// Toast
-let toastTimer;
+// ── TOAST ─────────────────────────────────────────────────────────────────
+
+let _toastTimer;
 function toast(msg, type) {
   let t = document.querySelector('.toast');
   if (!t) { t = document.createElement('div'); document.body.appendChild(t); }
   t.className = 'toast' + (type ? ' ' + type : '');
   t.textContent = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { if(t.parentNode) t.parentNode.removeChild(t); }, 3000);
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 3000);
 }

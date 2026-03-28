@@ -172,6 +172,14 @@ app.get('/api/domains', (c) => {
   return c.json({ total: all.length, domains: all })
 })
 
+app.get('/api/companies', async (c) => {
+  if (!c.env?.DB) return c.json({ companies: [] })
+  const result = await c.env.DB.prepare(
+    'SELECT id, key, name, phone, domain, budget, target_cpa, color_bg, color_accent, callouts, sitelinks FROM companies ORDER BY id'
+  ).all()
+  return c.json({ companies: result.results || [] })
+})
+
 app.post('/api/generate/landing-page', async (c) => {
   const { keyword, service, domain, company: co } = await c.req.json()
   if (!keyword || !service || !domain) return c.json({ error: 'keyword, service, domain required' }, 400)
