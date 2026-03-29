@@ -11,15 +11,45 @@
 
     /* ── THEME TOKENS ── */
     :root {
+      /* Brand */
       --accent:       #CC0000;
       --accent-h:     #aa0000;
+      --accent-rgb:   204,0,0;
+
+      /* Semantic palette (mirrors FirebrandIQ HSL vars, resolved to hex for vanilla CSS) */
+      --success:      #22c55e;   /* hsl(142.1 76.2% 36.3%) */
+      --success-lt:   #4ade80;   /* lighter success for text */
+      --warning:      #f59e0b;   /* hsl(32.5 94.6% 43.7%) */
+      --warning-lt:   #fbbf24;
+      --info:         #3b82f6;   /* hsl(217.2 91.2% 59.8%) — FirebrandIQ primary */
+      --info-lt:      #60a5fa;
+      --danger:       #ef4444;
+      --danger-lt:    #f87171;
+
+      /* Convenience aliases */
       --green:        #4ade80;
       --amber:        #F59E0B;
       --blue:         #60a5fa;
-      --sidebar-w:    220px;
+      --red:          #f87171;
+
+      /* Layout */
+      --sidebar-w:    224px;
       --topbar-h:     56px;
+
+      /* Radius scale (FirebrandIQ uses 0.5rem base) */
       --r:            8px;
+      --r-sm:         6px;
+      --r-lg:         12px;
+      --r-xl:         16px;
+      --r-full:       9999px;
+
+      /* Timing */
       --t:            0.18s ease;
+      --t-fast:       0.12s ease;
+      --t-slow:       0.28s ease;
+
+      /* Easing (FirebrandIQ accordion cubic-bezier) */
+      --ease-out:     cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     [data-theme="dark"] {
@@ -81,7 +111,7 @@
     .sidebar {
       width: var(--sidebar-w);
       background: var(--bg-sb);
-      border-right: 1px solid rgba(255,255,255,0.05);
+      border-right: 1px solid rgba(255,255,255,0.06);
       display: flex;
       flex-direction: column;
       position: fixed;
@@ -90,59 +120,104 @@
       transition: transform var(--t);
     }
 
+    /* Brand — FirebrandIQ: text-lg font-bold text-primary px-4 py-6 */
     .sb-brand {
-      padding: 16px 14px;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
+      padding: 18px 16px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
       display: flex;
       align-items: center;
       gap: 10px;
     }
-    .sb-brand-icon { font-size: 22px; flex-shrink: 0; }
-    .sb-name { font-size: 13px; font-weight: 800; color: #f1f5f9; }
-    .sb-sub  { font-size: 10px; color: rgba(255,255,255,0.28); margin-top: 1px; }
+    .sb-brand-icon {
+      font-size: 22px; flex-shrink: 0;
+      filter: drop-shadow(0 0 6px rgba(204,0,0,.45));
+    }
+    .sb-name {
+      font-size: 14px; font-weight: 800; color: #f1f5f9;
+      letter-spacing: -0.01em;
+    }
+    .sb-sub { font-size: 10px; color: rgba(255,255,255,0.32); margin-top: 1px; letter-spacing: .02em; }
 
-    .sb-nav { flex: 1; padding: 8px 8px; overflow-y: auto; }
+    /* Nav container */
+    .sb-nav { flex: 1; padding: 6px 8px; overflow-y: auto; scrollbar-width: none; }
+    .sb-nav::-webkit-scrollbar { display: none; }
 
+    /* Section group label — FirebrandIQ: text-xs font-semibold uppercase tracking-wider muted-foreground */
     .sb-group {
       font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: rgba(255,255,255,0.22);
-      padding: 14px 8px 5px;
+      letter-spacing: 0.1em;
+      color: rgba(255,255,255,0.32);
+      padding: 16px 8px 5px;
     }
 
+    /* Nav item — FirebrandIQ: flex items-center gap-3 px-3 py-2 rounded-md transition-colors */
     .nav-item {
       display: flex;
       align-items: center;
       gap: 9px;
       width: 100%;
-      padding: 8px 10px;
-      border-radius: var(--r);
+      padding: 7px 10px;
+      border-radius: var(--r-sm);
       background: none;
       border: none;
+      border-left: 2px solid transparent;
       color: var(--nav-c);
       font-size: 13px;
       font-weight: 500;
       cursor: pointer;
-      transition: all var(--t);
+      transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
       text-align: left;
       margin-bottom: 1px;
       white-space: nowrap;
+      position: relative;
     }
-    .nav-item:hover { background: rgba(255,255,255,0.05); color: #e2e8f0; }
+    /* Hover — FirebrandIQ: hover:bg-sidebar-accent/50 */
+    .nav-item:hover {
+      background: rgba(255,255,255,0.07);
+      color: #e2e8f0;
+      border-left-color: rgba(255,255,255,0.1);
+    }
+    /* Active — FirebrandIQ: bg-sidebar-accent text-sidebar-accent-foreground + left accent border */
     .nav-item.active {
       background: var(--nav-a-bg);
       color: var(--nav-a-tx);
       font-weight: 700;
+      border-left-color: var(--accent);
     }
+    /* Icon */
     .nav-icon { font-size: 15px; width: 20px; text-align: center; flex-shrink: 0; }
 
+    /* Nav badge — FirebrandIQ Badge variant="secondary" (NEW, BETA labels) */
+    .nav-badge {
+      margin-left: auto;
+      font-size: 9px; font-weight: 800;
+      padding: 1px 6px; border-radius: var(--r-full);
+      text-transform: uppercase; letter-spacing: .05em;
+      background: rgba(96,165,250,.18);
+      color: #93c5fd;
+      border: 1px solid rgba(96,165,250,.25);
+      flex-shrink: 0;
+    }
+    .nav-badge.new {
+      background: rgba(74,222,128,.15);
+      color: #4ade80;
+      border-color: rgba(74,222,128,.25);
+    }
+    .nav-badge.hot {
+      background: rgba(204,0,0,.15);
+      color: #fca5a5;
+      border-color: rgba(204,0,0,.25);
+    }
+
+    /* Footer */
     .sb-footer {
-      padding: 12px 14px;
-      border-top: 1px solid rgba(255,255,255,0.05);
+      padding: 12px 16px;
+      border-top: 1px solid rgba(255,255,255,0.06);
       font-size: 10px;
-      color: rgba(255,255,255,0.18);
+      color: rgba(255,255,255,0.22);
+      letter-spacing: .02em;
     }
 
     /* ── MAIN WRAP ── */
@@ -154,7 +229,7 @@
       min-height: 100vh;
     }
 
-    /* ── TOPBAR ── */
+    /* ── TOPBAR — FirebrandIQ Header pattern ── */
     .topbar {
       height: var(--topbar-h);
       background: var(--tb-bg);
@@ -166,6 +241,9 @@
       position: sticky;
       top: 0;
       z-index: 50;
+      /* subtle backdrop blur like FirebrandIQ header */
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
     }
 
     .sb-toggle {
@@ -330,9 +408,13 @@
 
     /* ── CONTENT ── */
     .content { flex: 1; padding: 24px; max-width: 1400px; width: 100%; }
-    .pane { display: none; animation: fadeIn .15s ease; }
-    .pane.active { display: block; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .pane { display: none; }
+    .pane.active { display: block; animation: fadeIn .2s var(--ease-out); }
+    /* FirebrandIQ-quality page entry animation */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
 
     /* ── PAGE HEADER ── */
     .ph { margin-bottom: 22px; }
@@ -343,9 +425,14 @@
     .card {
       background: var(--bg-c);
       border: 1px solid var(--bd);
-      border-radius: 12px;
+      border-radius: var(--r-lg);
       padding: 20px;
       margin-bottom: 16px;
+      /* FirebrandIQ: transition-shadow */
+      transition: box-shadow .2s ease, border-color .2s ease;
+    }
+    .card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,.28);
     }
     .card-hd {
       display: flex; align-items: center; justify-content: space-between;
@@ -357,6 +444,7 @@
     }
 
     /* ── STAT CARDS ── */
+    /* FirebrandIQ MetricCard: border-l-4, hover:shadow-md, hover:scale-[1.02] */
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -366,10 +454,18 @@
     .stat-card {
       background: var(--bg-c);
       border: 1px solid var(--bd);
-      border-radius: 12px;
+      border-radius: var(--r-lg);
       padding: 18px 20px;
-      border-top: 3px solid var(--sa, #CC0000);
+      /* FirebrandIQ MetricCard: border-l-4 border-l-primary/20 */
+      border-left: 4px solid var(--sa, #CC0000);
       position: relative;
+      /* hover:shadow-md hover:scale-[1.02] (MetricCard) */
+      transition: box-shadow .2s ease, transform .18s ease, border-color .15s ease;
+      cursor: default;
+    }
+    .stat-card:hover {
+      box-shadow: 0 6px 20px rgba(0,0,0,.35);
+      transform: scale(1.015) translateY(-1px);
     }
     .stat-num {
       font-size: 30px; font-weight: 900;
@@ -396,7 +492,8 @@
     .pill-parked     { background: rgba(100,116,139,.1);color: #64748b; border: 1px solid rgba(100,116,139,.2);}
 
     /* ── TABLE ── */
-    .tbl-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--bd); }
+    /* FirebrandIQ table pattern: clean headers, smooth row hover */
+    .tbl-wrap { overflow-x: auto; border-radius: var(--r-lg); border: 1px solid var(--bd); }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     thead th {
       background: var(--bg-s);
@@ -404,13 +501,13 @@
       text-align: left;
       font-weight: 700; color: var(--tx3);
       text-transform: uppercase; font-size: 10px;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.07em;
       border-bottom: 1px solid var(--bd);
       white-space: nowrap;
     }
-    tbody tr { border-bottom: 1px solid var(--bd); transition: background var(--t); }
+    tbody tr { border-bottom: 1px solid var(--bd); transition: background var(--t-fast); }
     tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: var(--bg-s); }
+    tbody tr:hover { background: rgba(255,255,255,.025); }
     tbody td { padding: 10px 13px; vertical-align: middle; color: var(--tx); }
     td.p1 { color: #f87171; font-weight: 700; }
     td.p2 { color: #F59E0B; font-weight: 600; }
@@ -418,17 +515,21 @@
     td.p4 { color: var(--tx3); }
 
     /* ── FILTER TABS ── */
+    /* FirebrandIQ: TabsList / TabsTrigger pattern — rounded pill with smooth transitions */
     .filter-row { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
     .ftab {
-      padding: 5px 12px; border-radius: 6px;
+      padding: 5px 13px; border-radius: var(--r-full);
       font-size: 12px; font-weight: 600;
       cursor: pointer;
       background: var(--bg-s); color: var(--tx3);
       border: 1px solid var(--bd);
-      transition: all var(--t);
+      transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast), box-shadow var(--t-fast);
     }
-    .ftab:hover { color: var(--tx); border-color: var(--bd2); }
-    .ftab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .ftab:hover { color: var(--tx); border-color: var(--bd2); background: var(--bg-c); }
+    .ftab.active {
+      background: var(--accent); color: #fff; border-color: var(--accent);
+      box-shadow: 0 2px 8px rgba(204,0,0,.35);
+    }
 
     /* ── QUICK FILL ── */
     .qf {
@@ -460,32 +561,43 @@
       transition: border var(--t), box-shadow var(--t);
     }
     input:focus, select:focus, textarea:focus {
-      border-color: var(--bd2);
-      box-shadow: 0 0 0 3px rgba(96,165,250,.08);
+      border-color: var(--blue);
+      /* FirebrandIQ ring pattern: 0 0 0 3px primary/20 */
+      box-shadow: 0 0 0 3px rgba(59,130,246,.15), 0 1px 3px rgba(0,0,0,.12);
+      outline: none;
     }
     select option { background: #1e293b; }
     textarea { resize: vertical; min-height: 80px; }
 
     /* ── BUTTONS ── */
+    /* FirebrandIQ: Button base — subtle lift on hover, scale-down on active */
     .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
     .btn {
       padding: 8px 17px; border-radius: var(--r);
       font-size: 13px; font-weight: 700;
       cursor: pointer; border: none;
-      transition: all var(--t);
+      transition: background var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast), color var(--t-fast), border-color var(--t-fast);
       display: inline-flex; align-items: center; gap: 5px;
+      user-select: none;
     }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: var(--accent-h); }
+    .btn:active { transform: scale(0.97); }
+
+    /* Primary — red brand with lift */
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 1px 3px rgba(204,0,0,.35); }
+    .btn-primary:hover { background: var(--accent-h); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(204,0,0,.45); }
+    .btn-primary:active { transform: scale(0.97); box-shadow: none; }
+
+    /* Secondary — muted bg */
     .btn-sec {
       background: var(--bg-s); color: var(--tx2);
       border: 1px solid var(--bd);
     }
-    .btn-sec:hover { border-color: var(--bd2); color: var(--tx); }
+    .btn-sec:hover { border-color: var(--bd2); color: var(--tx); background: var(--bg-c); }
+
     .btn-amber { background: #F59E0B; color: #000; }
-    .btn-amber:hover { background: #d97706; }
+    .btn-amber:hover { background: #d97706; transform: translateY(-1px); }
     .btn-green { background: #16a34a; color: #fff; }
-    .btn-green:hover { background: #15803d; }
+    .btn-green:hover { background: #15803d; transform: translateY(-1px); }
 
     /* ── OUTPUT BOX ── */
     .out {
@@ -1002,7 +1114,7 @@
         <span class="nav-icon">🎯</span><span>Keywords</span>
       </button>
       <button class="nav-item" data-section="publish" onclick="showSection('publish')">
-        <span class="nav-icon">🚀</span><span>Batch Publish</span>
+        <span class="nav-icon">🚀</span><span>Batch Publish</span><span class="nav-badge hot">BETA</span>
       </button>
       <button class="nav-item" data-section="images" onclick="showSection('images')">
         <span class="nav-icon">🖼️</span><span>Images</span>
@@ -1017,7 +1129,7 @@
         <span class="nav-icon">📋</span><span>Leads</span>
       </button>
       <button class="nav-item" data-section="intel" onclick="showSection('intel')">
-        <span class="nav-icon">🕵️</span><span>Intel</span>
+        <span class="nav-icon">🕵️</span><span>Intel</span><span class="nav-badge new">NEW</span>
       </button>
       <button class="nav-item super-nav" data-section="prospector" onclick="showSection('prospector')" style="display:none">
         <span class="nav-icon">🔭</span><span>Prospector</span>
