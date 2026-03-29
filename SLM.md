@@ -232,6 +232,11 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **On OAuth success redirect to `/app?oauth=success`** — not a static HTML page; cleaner UX and allows the app to show a success toast
 - **OAuth callback error pages now show Google's exact error** — `tokens.error` + `tokens.error_description` + HTTP status + which redirect_uri was used; helpful for diagnosing future `invalid_grant` or `invalid_client` errors
 - **Token storage format on success**: `{ access_token, refresh_token, expires_in, token_type, scope, stored_at }` — explicit field list prevents accidentally storing Google debug fields; KV key `google_oauth_tokens`, 30-day TTL
+- **Google OAuth flow confirmed working end to end (2026-03-29)** — auth request → Google consent screen → callback → token exchange → tokens stored in KV → redirect to `/app?oauth=success`
+- **Google Cloud Console: Testing status requires adding test users** — while the OAuth app status is "Testing" (not yet published), only explicitly added test users can complete the OAuth flow; add the Google account email at Google Cloud Console → OAuth consent screen → Audience → Test users; without this, Google returns `access_denied`
+- **"Google hasn't verified this app" warning is normal in Testing mode** — users see this interstitial; click "Continue" (or "Advanced" → "Go to [app name]") to proceed; this goes away once the app is published
+- **All 6 Cloudflare Pages secrets confirmed live**: `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`
+- **Google Ads Basic Access application submitted (2026-03-29)** — awaiting approval, estimated 3 business days; once approved, `KeywordPlanIdeaService` (keyword planner) and `POST /api/google-ads/push` (campaign creation) activate automatically — no code changes needed, credentials are already wired
 
 ---
 
