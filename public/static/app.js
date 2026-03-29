@@ -74,6 +74,7 @@ const SECTION_LABELS = {
   keywords:  'Keyword Research',
   publish:   'Batch Publish',
   images:    'Image Library',
+  reviews:   'Google Reviews',
   leads:     'Inbound Leads'
 };
 
@@ -93,6 +94,7 @@ function showSection(id) {
   if (id === 'ads')     loadPushHistory();
   if (id === 'publish') initPublishDomains();
   if (id === 'images')  { loadTemplates(); loadImageLibrary(); _populateImageDomainSelect(); }
+  if (id === 'reviews') { rvInit(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -720,7 +722,25 @@ async function generateLP() {
   const d = await r.json();
   lastLpHtml = d.html;
   document.getElementById('lp-output').textContent = d.html;
-  toast(`Generated [${mode.toUpperCase()}] for ` + d.brand);
+  // ── LP Checklist ──────────────────────────────────────────────────────────
+  const cl = d.checklist;
+  let clEl = document.getElementById('lp-checklist');
+  if (cl && clEl) {
+    const passCount = cl.passed.length;
+    const warnCount = cl.warnings.length;
+    const passedHtml = cl.passed.map(p => `<div class="chk-pass">✅ ${p}</div>`).join('');
+    const warnedHtml = cl.warnings.map(w => `<div class="chk-warn">⚠️ ${w}</div>`).join('');
+    clEl.innerHTML = `<div class="checklist-wrap">
+      <div class="checklist-hd">
+        <span style="color:#4ade80">✅ ${passCount} passed</span>
+        <span style="color:${warnCount > 0 ? '#f59e0b' : '#4ade80'}">⚠️ ${warnCount} warning${warnCount !== 1 ? 's' : ''}</span>
+        <span style="color:var(--txt3);font-weight:400;font-size:12px">Template ${d.template}: ${d.templateName}</span>
+      </div>
+      <div class="checklist-body">${passedHtml}${warnedHtml}</div>
+    </div>`;
+    clEl.style.display = 'block';
+  }
+  toast(`Generated [${mode.toUpperCase()}] for ` + d.brand + (cl && cl.warnings.length ? ` — ${cl.warnings.length} warning(s)` : ''));
 }
 
 function copyLP() {
@@ -1275,8 +1295,199 @@ function _populateImageDomainSelect() {
     allDomains.map(d => `<option value="${d.id}">${d.domain}</option>`).join('');
 }
 
-// Hook into showSection to load data when images pane is shown
-const _origShowSection = typeof showSection === 'function' ? showSection : null;
+// ── GOOGLE REVIEWS ────────────────────────────────────────────────────────
+
+let _rvSelectedCompanyId = null;
+
+async function rvInit() {
+  // Populate company selector
+  const sel = document.getElementById('rv-company-sel');
+  if (!sel || !allCompanies) return;
+  sel.innerHTML = '<option value="">— Select Company —</option>' +
+    allCompanies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  // Load overview table (super_admin sees all)
+  rvLoadOverview();
+}
+
+async function rvLoadProfile() {
+  const sel  = document.getElementById('rv-company-sel');
+  const cId  = sel?.value;
+  if (!cId) return;
+  _rvSelectedCompanyId = cId;
+
+  const statusEl = document.getElementById('rv-profile-status');
+  const searchEl = document.getElementById('rv-search-section');
+  const listCard = document.getElementById('rv-list-card');
+  statusEl.textContent = 'Loading…';
+
+  const r = await fetch(`/api/reviews/${cId}`, { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+  const d = await r.json();
+
+  if (d.profile) {
+    const lastSync = d.profile.last_synced ? new Date(d.profile.last_synced).toLocaleString() : 'Never';
+    statusEl.innerHTML = `<span style="color:#4ade80;font-weight:700">✅ Connected:</span> <strong>${d.profile.business_name}</strong> &nbsp;·&nbsp;
+      ⭐ ${d.profile.average_rating || '—'} &nbsp;·&nbsp; ${d.profile.total_reviews || 0} reviews &nbsp;·&nbsp;
+      <span style="color:var(--txt3)">Last sync: ${lastSync}</span>`;
+    searchEl.style.display = 'none';
+    // Show reviews list
+    listCard.style.display = 'block';
+    document.getElementById('rv-list-title').textContent = `Reviews — ${d.profile.business_name}`;
+    rvRenderStats(d.profile);
+    rvRenderRows(d.reviews || []);
+  } else {
+    statusEl.innerHTML = `<span style="color:#f59e0b">⚠️ No Google Business Profile connected.</span> Search below to find and connect this company's profile.`;
+    searchEl.style.display = 'block';
+    listCard.style.display = 'none';
+    document.getElementById('rv-search-input').value = '';
+    document.getElementById('rv-search-results').style.display = 'none';
+  }
+}
+
+function rvRenderStats(profile) {
+  const el = document.getElementById('rv-stats-bar');
+  if (!el) return;
+  el.innerHTML = `
+    <div><div style="font-size:22px;font-weight:900;color:var(--ac)">${profile.average_rating || '—'}</div><div style="font-size:11px;color:var(--txt3)">Avg Rating</div></div>
+    <div><div style="font-size:22px;font-weight:900;color:var(--ac)">${profile.total_reviews || 0}</div><div style="font-size:11px;color:var(--txt3)">Total Reviews</div></div>
+    <div><div style="font-size:12px;margin-top:4px"><a href="${profile.profile_url || '#'}" target="_blank" rel="noopener" style="color:#388bfd">View on Google Maps ↗</a></div></div>
+  `;
+}
+
+function rvRenderRows(reviews) {
+  const el = document.getElementById('rv-rows');
+  if (!el) return;
+  if (!reviews.length) {
+    el.innerHTML = '<div style="color:var(--txt3);font-size:13px">No reviews synced yet. Click "Sync Now" to fetch from Google.</div>';
+    return;
+  }
+  el.innerHTML = reviews.map(rv => {
+    const stars = '⭐'.repeat(rv.rating || 5);
+    const feat  = rv.featured ? '<span class="rv-feat-badge">Featured</span>' : '';
+    const truncated = rv.review_text.length > 280 ? rv.review_text.slice(0, 277) + '…' : rv.review_text;
+    return `<div class="rv-row">
+      <div>
+        <div class="rv-row-stars">${stars} ${feat}</div>
+        <div class="rv-row-text">"${truncated}"</div>
+        <div class="rv-row-meta"><strong>${rv.reviewer_name}</strong> &nbsp;·&nbsp; ${rv.relative_time || rv.review_date || ''}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <button class="btn btn-sm ${rv.featured ? 'btn-sec' : 'btn-primary'}" onclick="rvToggleFeatured(${rv.id},${rv.featured ? 0 : 1})">
+          ${rv.featured ? '☆ Unfeature' : '★ Feature'}
+        </button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function rvSearchBusiness() {
+  const query = document.getElementById('rv-search-input').value.trim();
+  if (!query) return;
+  const btn = document.querySelector('[onclick="rvSearchBusiness()"]');
+  if (btn) btn.textContent = 'Searching…';
+  const resEl = document.getElementById('rv-search-results');
+  resEl.style.display = 'none';
+
+  const r = await fetch('/api/reviews/search-business', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ query })
+  });
+  const d = await r.json();
+  if (btn) btn.textContent = '🔍 Search';
+
+  if (d.error) {
+    const banner = document.getElementById('reviews-api-banner');
+    if (banner) banner.style.display = 'block';
+    toast(d.error, 'error'); return;
+  }
+  if (!d.results || !d.results.length) {
+    resEl.innerHTML = '<div style="color:var(--txt3);font-size:13px;padding:12px 0">No results found — try a different search term.</div>';
+    resEl.style.display = 'block'; return;
+  }
+  resEl.innerHTML = d.results.map(p => `
+    <div class="rv-search-result" onclick='rvConnectProfile(${JSON.stringify(p)})'>
+      <div class="rv-search-name">${p.name}</div>
+      <div class="rv-search-addr">${p.address}</div>
+      <div class="rv-search-rating">⭐ ${p.rating || '—'} · ${p.total_reviews} reviews</div>
+    </div>`).join('');
+  resEl.style.display = 'block';
+}
+
+async function rvConnectProfile(place) {
+  if (!_rvSelectedCompanyId) { toast('Select a company first', 'error'); return; }
+  const r = await fetch(`/api/reviews/connect/${_rvSelectedCompanyId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ place_id: place.place_id, business_name: place.name, average_rating: place.rating, total_reviews: place.total_reviews, profile_url: place.maps_url })
+  });
+  const d = await r.json();
+  if (d.success) {
+    toast('Connected! Syncing reviews…');
+    await rvSync();
+    rvLoadProfile();
+    rvLoadOverview();
+  } else {
+    toast(d.error || 'Connect failed', 'error');
+  }
+}
+
+async function rvSync() {
+  if (!_rvSelectedCompanyId) { toast('Select a company first', 'error'); return; }
+  const statusEl = document.getElementById('rv-sync-status');
+  if (statusEl) statusEl.textContent = 'Syncing…';
+  const r = await fetch(`/api/reviews/sync/${_rvSelectedCompanyId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` }
+  });
+  const d = await r.json();
+  if (d.success) {
+    toast(`Synced ${d.synced} reviews (${d.featured} featured)`);
+    if (statusEl) statusEl.textContent = `Last sync: just now`;
+    rvLoadProfile();
+    rvLoadOverview();
+  } else {
+    toast(d.error || 'Sync failed', 'error');
+    if (statusEl) statusEl.textContent = '';
+  }
+}
+
+async function rvToggleFeatured(reviewId, featured) {
+  const r = await fetch(`/api/reviews/${reviewId}/featured`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ featured })
+  });
+  const d = await r.json();
+  if (d.success) { toast(featured ? 'Marked as featured' : 'Removed from featured'); rvLoadProfile(); }
+  else toast(d.error || 'Update failed', 'error');
+}
+
+async function rvLoadOverview() {
+  const el = document.getElementById('rv-overview-rows');
+  if (!el) return;
+  const r = await fetch('/api/reviews', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+  const d = await r.json();
+  if (!d.profiles || !d.profiles.length) {
+    el.innerHTML = '<div style="color:var(--txt3);font-size:13px">No companies have connected a Google Business Profile yet.</div>';
+    return;
+  }
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+    <thead><tr style="border-bottom:1px solid var(--bd);color:var(--txt3)">
+      <th style="padding:8px 0;text-align:left">Company</th>
+      <th style="padding:8px 0;text-align:left">Business Profile</th>
+      <th style="padding:8px 0;text-align:center">Rating</th>
+      <th style="padding:8px 0;text-align:center">Reviews Stored</th>
+      <th style="padding:8px 0;text-align:left">Last Sync</th>
+    </tr></thead>
+    <tbody>${d.profiles.map(p => `<tr style="border-bottom:1px solid var(--bd)">
+      <td style="padding:10px 0"><strong>${p.company_name}</strong></td>
+      <td style="padding:10px 0;color:var(--txt2)">${p.business_name}</td>
+      <td style="padding:10px 0;text-align:center">⭐ ${p.average_rating || '—'}</td>
+      <td style="padding:10px 0;text-align:center">${p.review_count || 0}</td>
+      <td style="padding:10px 0;color:var(--txt3)">${p.last_synced ? new Date(p.last_synced).toLocaleDateString() : 'Never'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function getStoredToken() {
+  return document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('slm_token='))?.split('=')[1] || '';
+}
 
 // ── TOAST ─────────────────────────────────────────────────────────────────
 

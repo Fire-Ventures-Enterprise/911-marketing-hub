@@ -21,9 +21,14 @@
       "bucket_name": "slm-hub-images"
     }
   ],
-  // Porkbun API v3 credentials are stored as Cloudflare encrypted secrets.
-  // Set via: wrangler pages secret put PORKBUN_API_KEY --project-name services-leads-marketing-hub
-  // Do NOT add them to vars — Cloudflare rejects duplicate binding names across secrets + vars.
+  // Secrets (all set via: npx wrangler pages secret put KEY --project-name services-leads-marketing-hub)
+  // Do NOT add to vars — Cloudflare rejects duplicate binding names across secrets + vars.
+  //
+  // PORKBUN_API_KEY, PORKBUN_SECRET_KEY — Porkbun API v3 domain management
+  // GOOGLE_ADS_DEVELOPER_TOKEN, GOOGLE_ADS_CUSTOMER_ID, GOOGLE_ADS_CLIENT_ID, GOOGLE_ADS_CLIENT_SECRET — Google Ads API v18
+  // GOOGLE_PLACES_API_KEY — Google Places API (New) for Google Reviews integration
+  //   Enable at: Google Cloud Console → APIs & Services → Google Places API (New)
+  //   Set via:   echo "YOUR_KEY" | npx wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub
 
   // Custom domains (added via Cloudflare Pages API — no wrangler.jsonc field exists for Pages domains):
   //   PRIMARY:  slm-hub.ca  (CF domain ID: c4a0e717-0e71-4e10-a455-35b382fc000b) — status: active

@@ -29,7 +29,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`
 
 ### R2 Bucket
 - **Name:** `slm-hub-images`
@@ -237,6 +237,35 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **"Google hasn't verified this app" warning is normal in Testing mode** — users see this interstitial; click "Continue" (or "Advanced" → "Go to [app name]") to proceed; this goes away once the app is published
 - **All 6 Cloudflare Pages secrets confirmed live**: `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`
 - **Google Ads Basic Access application submitted (2026-03-29)** — awaiting approval, estimated 3 business days; once approved, `KeywordPlanIdeaService` (keyword planner) and `POST /api/google-ads/push` (campaign creation) activate automatically — no code changes needed, credentials are already wired
+- **Google Reviews Integration built (2026-03-29)**: `google_reviews` and `google_business_profiles` tables confirmed in D1; `GOOGLE_PLACES_API_KEY` added to `Bindings`; full sync/connect/featured-toggle API built
+- **Google Places API (New) reviews response structure**: `reviews[].authorAttribution.displayName`, `.photoUri`; `reviews[].text.text`; `reviews[].rating`; `reviews[].relativePublishTimeDescription`; `reviews[].publishTime` — different field names from Places API (Legacy)
+- **Places API review limitation**: Google Places API (New) returns max 5 most-recent reviews per place, not sorted by rating; workaround: sort by rating DESC after fetch, filter rating ≥ 4 + text ≥ 50 chars, store top 10 qualifying, auto-feature top 5
+- **Review sync flow**: `POST /api/reviews/sync/{company_id}` → fetch place details → filter qualifying reviews → DELETE + re-INSERT in D1 → auto-feature top 5 → update profile stats → delete KV cache key `reviews:{company_id}`
+- **Review KV cache**: `reviews:{company_id}` key, 24-hour TTL; LP generation checks KV first, falls back to D1; sync invalidates cache immediately
+- **`generateLandingPage` real reviews param**: new 8th parameter `realReviews: ReviewRow[] | null` — when provided and non-empty, renders real reviews with star count + "✓ Google" badge; when null shows admin placeholder with orange border; fake `getLPReviews()` function still exists for non-LP uses but is never called from LP generation
+- **AggregateRating schema updated**: when real reviews are passed, schema uses computed `avgRating` + actual `reviewCount`; when no reviews, defaults to `4.9 / 127` (keeps schema valid without real data)
+- **`validateLP` function**: checks 16 conditions across Technical SEO, Schema, Conversion, Links, Reviews; returns `{ passed[], warnings[] }`; LP endpoint returns `checklist` in response JSON; admin UI shows green/yellow checklist below LP output; warnings are advisory — LP always generated regardless
+- **LP checklist review check**: passes if no `rv-placeholder` class in HTML (real reviews loaded); warns if placeholder shown (no profile connected)
+- **Reviews pane**: sidebar nav item "⭐ Reviews"; `pane-reviews` with connect-profile section, search-business UI, reviews list with featured toggle, stats bar, all-companies overview table
+- **`rvInit()` populates company selector** from `allCompanies`; `rvLoadProfile()` checks if profile exists, shows search section if not; `rvSync()` calls `POST /api/reviews/sync/{company_id}`
+- **`getStoredToken()` helper** reads `slm_token` from cookie for API calls within reviews JS — avoids duplicating auth logic
+- **Reviews endpoint auth**: `POST /api/reviews/search-business`, `POST /api/reviews/connect/:id`, `POST /api/reviews/sync/:id` require `super_admin` or `company_admin`; company_admin scoped to their own company_id; `GET /api/reviews/:company_id` requires any authenticated user
+- **`getLPReviews` fake review function kept** — still in codebase as fallback reference but never called from LP endpoint; remove in a future cleanup session
+
+---
+
+## GOOGLE REVIEWS DOCTRINE
+
+All reviews displayed on landing pages must be pulled from Google Business Profile via Google Places API (New). Zero fake reviews are permitted under any circumstance.
+
+- **Source**: Google Places API (New) — `GET https://places.googleapis.com/v1/places/{placeId}` with `X-Goog-FieldMask: reviews`
+- **Minimum rating for display**: 4 stars — reviews below 4 stars are never stored or shown
+- **Minimum text length**: 50 characters — empty and one-word reviews are discarded
+- **Featured reviews**: top 5 by rating DESC then date DESC — auto-assigned on sync; admin can manually override via featured toggle
+- **Cache**: D1 is the source of truth; KV caches featured reviews per company with 24-hour TTL; sync invalidates cache
+- **No real reviews**: show admin placeholder `rv-placeholder` — never show fake names, never fabricate content
+- **LP checklist**: every LP generation runs `validateLP()` — warns if no real reviews connected
+- **API key required**: `GOOGLE_PLACES_API_KEY` secret in CF Pages — set via `echo "KEY" | npx wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub` then redeploy
 
 ---
 

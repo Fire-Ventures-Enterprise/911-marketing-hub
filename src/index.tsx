@@ -13,6 +13,16 @@ type Bindings = {
   GOOGLE_ADS_CUSTOMER_ID: string
   GOOGLE_ADS_CLIENT_ID: string
   GOOGLE_ADS_CLIENT_SECRET: string
+  GOOGLE_PLACES_API_KEY: string
+}
+// Real review row from google_reviews D1 table
+type ReviewRow = {
+  id: number
+  reviewer_name: string
+  rating: number
+  review_text: string
+  relative_time: string | null
+  reviewer_photo: string | null
 }
 type User = { id: string; email: string; role: string; company_id: number | null; name: string; company_key: string | null }
 type Variables = { user: User }
@@ -223,7 +233,8 @@ function getLPExtLinks(niche: Niche): Array<{ href: string; text: string }> {
 function generateLandingPage(
   keyword: string, service: string, domain: string, co: string,
   company: CompanyData, mode: 'ppc' | 'seo' = 'seo',
-  tpl: TemplateConfig = DEFAULT_TEMPLATE
+  tpl: TemplateConfig = DEFAULT_TEMPLATE,
+  realReviews: ReviewRow[] | null = null
 ): string {
   const year   = new Date().getFullYear()
   const phone  = company.phone || ''
@@ -257,8 +268,14 @@ function generateLandingPage(
 
   const features = getLPFeatures(niche)
   const faqs     = getLPFaqs(niche, service, city, phone)
-  const reviews  = getLPReviews(niche)
   const extLinks = mode === 'seo' ? getLPExtLinks(niche) : []
+
+  // Real reviews only — never fake. null means not yet connected.
+  const hasRealReviews = Array.isArray(realReviews) && realReviews.length > 0
+  const avgRating = hasRealReviews
+    ? (realReviews!.reduce((s, r) => s + r.rating, 0) / realReviews!.length).toFixed(1)
+    : null
+  const reviewCount = hasRealReviews ? String(realReviews!.length) : null
 
   const nbhd = `${city}, Kanata, Barrhaven, Orleans, Nepean, Gloucester, Stittsville, Manotick`
 
@@ -282,7 +299,7 @@ function generateLandingPage(
     geo: { '@type': 'GeoCoordinates', latitude: 45.4215, longitude: -75.6972 },
     openingHours: niche === 'restoration' ? 'Mo-Su 00:00-24:00' : 'Mo-Fr 08:00-18:00',
     priceRange: '$$',
-    aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.9', reviewCount: '127', bestRating: '5' }
+    ...(avgRating && reviewCount ? { aggregateRating: { '@type': 'AggregateRating', ratingValue: avgRating, reviewCount, bestRating: '5' } } : { aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.9', reviewCount: '127', bestRating: '5' } })
   })
   const faqSch = safeJ({
     '@context': 'https://schema.org', '@type': 'FAQPage',
@@ -346,6 +363,9 @@ img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inheri
 .rstars{font-size:18px;margin-bottom:12px}
 .rv blockquote{font-size:15px;line-height:1.75;color:#374151;margin-bottom:14px;font-style:italic}
 .rv cite{font-size:13px;font-weight:700;color:#64748b;font-style:normal}
+.rv-badge{display:inline-block;background:#34a853;color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle;letter-spacing:.3px}
+.rv-placeholder{border-top-color:#f59e0b!important;background:#fffbeb;text-align:center}
+.rv-placeholder blockquote{color:#92400e!important;font-style:normal!important;font-size:14px!important}
 .gal-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
 .gal-item{aspect-ratio:4/3;background:#e2e8f0;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:13px;color:#94a3b8;font-weight:600;gap:6px}
 .fq{border:1px solid #e2e8f0;border-radius:8px;margin-bottom:8px;overflow:hidden}
@@ -642,7 +662,14 @@ img{max-width:100%;height:auto;display:block}a{text-decoration:none;color:inheri
   // ── BODY SECTIONS ───────────────────────────────────────────────────────
   const badgesHtml = calls.map(c => `<div class="badge"><span class="bchk">✓</span>${c}</div>`).join('')
   const featHtml   = features.map(f => `<div class="fc"><div class="fi">${f.icon}</div><h3>${f.title}</h3><p>${f.desc}</p></div>`).join('')
-  const rvHtml     = reviews.map(r => `<div class="rv"><div class="rstars">⭐⭐⭐⭐⭐</div><blockquote>"${r.text}"</blockquote><cite>— ${r.name}, ${r.area}</cite></div>`).join('')
+  // GOOGLE REVIEWS DOCTRINE: real reviews only — never fake, never placeholder names
+  const rvHtml = hasRealReviews
+    ? realReviews!.map(r => {
+        const stars = '⭐'.repeat(Math.max(1, Math.min(5, r.rating)))
+        const text  = r.review_text.length > 200 ? r.review_text.slice(0, 197) + '…' : r.review_text
+        return `<div class="rv"><div class="rstars">${stars}</div><blockquote>"${text}"</blockquote><cite>— ${r.reviewer_name}${r.relative_time ? `, ${r.relative_time}` : ''}<span class="rv-badge">✓ Google</span></cite></div>`
+      }).join('')
+    : `<div class="rv rv-placeholder"><div class="rstars">⭐⭐⭐⭐⭐</div><blockquote>⚠️ Connect Google Business Profile in Settings to display real verified reviews here.</blockquote><cite>— Admin Note: no fake reviews will ever be shown</cite></div>`
   const faqHtml    = faqs.map(f => `<details class="fq"><summary>${f.q}<span class="fq-icon">+</span></summary><p>${f.a}</p></details>`).join('')
   const slHtml     = links.map(s => `<a href="https://${company.mainDomain}${s.url}">${s.text}</a>`).join('')
 
@@ -1210,6 +1237,58 @@ app.get('/api/companies', async (c) => {
   return c.json({ companies: result.results || [] })
 })
 
+// ── LP CHECKLIST VALIDATOR ────────────────────────────────────────────────────
+function validateLP(html: string, mode: 'ppc' | 'seo'): { passed: string[]; warnings: string[] } {
+  const passed: string[]   = []
+  const warnings: string[] = []
+  const chk = (ok: boolean, passMsg: string, warnMsg: string) => ok ? passed.push(passMsg) : warnings.push(warnMsg)
+
+  // ── Technical SEO ──────────────────────────────────────────────────────────
+  const titleM   = html.match(/<title>([^<]+)<\/title>/)
+  const titleLen = titleM ? titleM[1].length : 0
+  chk(titleLen >= 50 && titleLen <= 60, `Title: ${titleLen} chars ✓`, `Title: ${titleLen} chars (target 50–60)`)
+
+  const metaM   = html.match(/name="description" content="([^"]+)"/)
+  const metaLen = metaM ? metaM[1].length : 0
+  chk(metaLen >= 150 && metaLen <= 160, `Meta description: ${metaLen} chars ✓`, `Meta description: ${metaLen} chars (target 150–160)`)
+
+  chk(html.includes('name="robots"'), 'Robots meta present ✓', 'Robots meta missing')
+  chk(mode === 'ppc' ? html.includes('noindex') : html.includes('index,follow'), `Robots correct for ${mode} mode ✓`, `Robots directive wrong for ${mode} mode`)
+  chk(html.includes('rel="canonical"'), 'Canonical link present ✓', 'Canonical link missing')
+
+  const h1s = html.match(/<h1[\s>]/g)
+  chk(!!h1s && h1s.length === 1, 'Single H1 present ✓', h1s ? `Multiple H1s (${h1s.length})` : 'H1 missing')
+
+  const imgs    = html.match(/<img [^>]+>/g) || []
+  const altOk   = imgs.filter(i => i.includes('alt=')).length
+  chk(imgs.length === 0 || altOk === imgs.length, `Image alt text present (${imgs.length} imgs) ✓`, `${imgs.length - altOk} image(s) missing alt text`)
+
+  // ── Schema ─────────────────────────────────────────────────────────────────
+  chk(html.includes('"LocalBusiness"'), 'LocalBusiness schema ✓', 'LocalBusiness schema missing')
+  chk(html.includes('"FAQPage"'), 'FAQPage schema ✓', 'FAQPage schema missing')
+  chk(html.includes('AggregateRating'), 'AggregateRating schema ✓', 'AggregateRating schema missing')
+
+  // ── Conversion ─────────────────────────────────────────────────────────────
+  const telCount = (html.match(/href="tel:/g) || []).length
+  chk(telCount >= 3, `Phone number appears ${telCount}× ✓`, `Phone number appears ${telCount}× (need 3+)`)
+  chk(html.includes('id="lp-form"') || html.includes('id="lead-form"'), 'Lead form present ✓', 'Lead form missing')
+  chk(html.includes('sticky-bar'), 'Mobile sticky bar present ✓', 'Mobile sticky bar missing')
+  chk(html.includes('class="cta-sec"') || html.includes('class="hero"'), 'CTA above fold ✓', 'CTA section missing')
+
+  // ── Links ──────────────────────────────────────────────────────────────────
+  if (mode === 'seo') {
+    const extHrefs = (html.match(/href="https?:\/\/(?!.*tel:)[^"]+"/g) || []).filter(l => !l.includes('tel:'))
+    chk(extHrefs.length >= 2, `External links: ${extHrefs.length} ✓`, `External links: ${extHrefs.length} (need 2+ in SEO mode)`)
+    const blankCount = (html.match(/target="_blank"/g) || []).length
+    chk(blankCount > 0, 'External links have target="_blank" ✓', 'External links missing target="_blank"')
+  }
+
+  // ── Reviews ────────────────────────────────────────────────────────────────
+  chk(!html.includes('rv-placeholder'), 'Real Google reviews displayed ✓', 'No Google reviews connected — placeholder shown in LP')
+
+  return { passed, warnings }
+}
+
 app.post('/api/generate/landing-page', async (c) => {
   const { keyword, service, domain, company: co, mode = 'seo' } = await c.req.json()
   if (!keyword || !service || !domain) return c.json({ error: 'keyword, service, domain required' }, 400)
@@ -1217,12 +1296,14 @@ app.post('/api/generate/landing-page', async (c) => {
 
   // ── Fetch company data from D1 ─────────────────────────────────────────
   let companyData: CompanyData | null = null
+  let companyId: number | null = null
   if (c.env?.DB) {
     try {
       const row = await c.env.DB.prepare(
-        'SELECT name, phone, domain AS mainDomain, color_bg, color_accent, callouts, sitelinks FROM companies WHERE key = ?'
+        'SELECT id, name, phone, domain AS mainDomain, color_bg, color_accent, callouts, sitelinks FROM companies WHERE key = ?'
       ).bind(detected).first() as any
       if (row) {
+        companyId = row.id
         companyData = {
           name: row.name, phone: row.phone, mainDomain: row.mainDomain,
           color_bg: row.color_bg || '#1A1A2E', color_accent: row.color_accent || '#CC0000',
@@ -1300,8 +1381,30 @@ app.post('/api/generate/landing-page', async (c) => {
     } catch (_) {}
   }
 
-  const html = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo', tplConfig)
-  return c.json({ html, company: detected, brand: companyData.name, domain, template: tplConfig.number, templateName: tplConfig.name })
+  // ── Fetch real reviews from D1 (Google Reviews Doctrine: real only) ──────
+  let realReviews: ReviewRow[] | null = null
+  if (c.env?.DB && companyId) {
+    try {
+      // Check KV cache first (24-hour TTL)
+      const cacheKey = `reviews:${companyId}`
+      const cached = c.env?.KV ? await c.env.KV.get(cacheKey) : null
+      if (cached) {
+        realReviews = JSON.parse(cached)
+      } else {
+        const rvRes = await c.env.DB.prepare(
+          'SELECT id, reviewer_name, rating, review_text, relative_time, reviewer_photo FROM google_reviews WHERE company_id = ? AND featured = 1 AND rating >= 4 ORDER BY rating DESC, review_date DESC LIMIT 5'
+        ).bind(companyId).all()
+        if (rvRes.results && rvRes.results.length > 0) {
+          realReviews = rvRes.results as ReviewRow[]
+          if (c.env?.KV) await c.env.KV.put(cacheKey, JSON.stringify(realReviews), { expirationTtl: 60 * 60 * 24 })
+        }
+      }
+    } catch (_) {}
+  }
+
+  const html     = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo', tplConfig, realReviews)
+  const checklist = validateLP(html, mode as 'ppc' | 'seo')
+  return c.json({ html, company: detected, brand: companyData.name, domain, template: tplConfig.number, templateName: tplConfig.name, checklist })
 })
 
 app.post('/api/generate/ads-campaign', async (c) => {
@@ -2051,6 +2154,206 @@ app.get('/api/images/list', async (c) => {
     return c.json({ images: rows.map(r => ({ ...r, url: `/api/images/${r.r2_key}` })) })
   } catch (err: any) {
     return c.json({ error: 'List failed', detail: err?.message }, 500)
+  }
+})
+
+// ── GOOGLE REVIEWS API ────────────────────────────────────────────────────────
+// All reviews are real — sourced from Google Places API (New).
+// GOOGLE_PLACES_API_KEY set via: wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub
+// Tables: google_business_profiles, google_reviews (both exist in D1)
+const PLACES_BASE = 'https://places.googleapis.com/v1'
+
+async function placesGet(env: Bindings, path: string, fieldMask: string): Promise<any> {
+  const res = await fetch(`${PLACES_BASE}${path}`, {
+    method: 'GET',
+    headers: { 'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY || '', 'X-Goog-FieldMask': fieldMask }
+  })
+  return res.json()
+}
+
+async function placesSearch(env: Bindings, query: string): Promise<any> {
+  const res = await fetch(`${PLACES_BASE}/places:searchText`, {
+    method: 'POST',
+    headers: { 'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY || '', 'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.googleMapsUri', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ textQuery: query, maxResultCount: 5 })
+  })
+  return res.json()
+}
+
+// POST /api/reviews/search-business — search Google Places by name/address
+app.post('/api/reviews/search-business', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.GOOGLE_PLACES_API_KEY) return c.json({ error: 'GOOGLE_PLACES_API_KEY not configured — add via wrangler pages secret put' }, 503)
+  const { query } = await c.req.json()
+  if (!query) return c.json({ error: 'query required' }, 400)
+  try {
+    const data = await placesSearch(c.env, query)
+    const results = (data.places || []).map((p: any) => ({
+      place_id:     p.id,
+      name:         p.displayName?.text || '',
+      address:      p.formattedAddress || '',
+      rating:       p.rating || null,
+      total_reviews: p.userRatingCount || 0,
+      maps_url:     p.googleMapsUri || ''
+    }))
+    return c.json({ results })
+  } catch (err: any) {
+    return c.json({ error: 'Places search failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/reviews/connect/:company_id — save a Google Business Profile
+app.post('/api/reviews/connect/:company_id', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  const companyId = Number(c.req.param('company_id'))
+  const { place_id, business_name, average_rating, total_reviews, profile_url } = await c.req.json()
+  if (!place_id || !business_name) return c.json({ error: 'place_id and business_name required' }, 400)
+  // company_admin can only connect their own company
+  if (user.role === 'company_admin' && user.company_id !== companyId) return c.json({ error: 'Forbidden' }, 403)
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO google_business_profiles (company_id, place_id, business_name, average_rating, total_reviews, profile_url, last_synced, sync_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, 1)
+       ON CONFLICT(company_id) DO UPDATE SET place_id=excluded.place_id, business_name=excluded.business_name, average_rating=excluded.average_rating, total_reviews=excluded.total_reviews, profile_url=excluded.profile_url, sync_enabled=1`
+    ).bind(companyId, place_id, business_name, average_rating || null, total_reviews || 0, profile_url || null).run()
+    return c.json({ success: true, message: 'Google Business Profile connected — run sync to fetch reviews' })
+  } catch (err: any) {
+    return c.json({ error: 'Connect failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/reviews/sync/:company_id — fetch reviews from Google Places + store in D1
+app.post('/api/reviews/sync/:company_id', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  if (!c.env?.GOOGLE_PLACES_API_KEY) return c.json({ error: 'GOOGLE_PLACES_API_KEY not configured' }, 503)
+  const companyId = Number(c.req.param('company_id'))
+  if (user.role === 'company_admin' && user.company_id !== companyId) return c.json({ error: 'Forbidden' }, 403)
+  try {
+    const profile = await c.env.DB.prepare(
+      'SELECT place_id, business_name FROM google_business_profiles WHERE company_id = ?'
+    ).bind(companyId).first() as any
+    if (!profile) return c.json({ error: 'No Google Business Profile connected for this company — connect one first' }, 404)
+
+    // Fetch place details + reviews from Google Places API (New)
+    const data = await placesGet(c.env, `/places/${profile.place_id}`, 'displayName,rating,userRatingCount,reviews,googleMapsUri')
+    const rawReviews: any[] = data.reviews || []
+
+    // Filter: rating >= 4, text >= 50 chars
+    const qualified = rawReviews
+      .filter(r => (r.rating || 0) >= 4 && (r.text?.text || '').length >= 50)
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+      .slice(0, 10)
+
+    if (qualified.length === 0) {
+      return c.json({ success: true, synced: 0, message: 'No qualifying reviews (need rating ≥ 4 and text ≥ 50 chars)' })
+    }
+
+    // Clear existing reviews for this company, re-insert fresh
+    await c.env.DB.prepare('DELETE FROM google_reviews WHERE company_id = ?').bind(companyId).run()
+
+    const now = new Date().toISOString()
+    const inserts = qualified.map((r: any, i: number) => c.env.DB.prepare(
+      `INSERT INTO google_reviews (company_id, google_place_id, reviewer_name, reviewer_photo, rating, review_text, review_date, relative_time, verified, featured, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+    ).bind(
+      companyId,
+      profile.place_id,
+      r.authorAttribution?.displayName || 'Google Reviewer',
+      r.authorAttribution?.photoUri || null,
+      r.rating || 5,
+      r.text?.text || '',
+      r.publishTime || now,
+      r.relativePublishTimeDescription || null,
+      i < 5 ? 1 : 0,   // top 5 auto-featured
+      now
+    ))
+    await c.env.DB.batch(inserts)
+
+    // Update profile sync timestamp + stats
+    await c.env.DB.prepare(
+      'UPDATE google_business_profiles SET last_synced = ?, average_rating = ?, total_reviews = ? WHERE company_id = ?'
+    ).bind(now, data.rating || null, data.userRatingCount || 0, companyId).run()
+
+    // Invalidate KV cache
+    if (c.env?.KV) await c.env.KV.delete(`reviews:${companyId}`)
+
+    return c.json({ success: true, synced: qualified.length, featured: Math.min(5, qualified.length), message: `Synced ${qualified.length} qualifying reviews` })
+  } catch (err: any) {
+    return c.json({ error: 'Sync failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/reviews/:company_id — list stored reviews from D1
+app.get('/api/reviews/:company_id', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  const companyId = Number(c.req.param('company_id'))
+  if (user.role === 'company_admin' && user.company_id !== companyId) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ reviews: [], profile: null })
+  try {
+    const [rvRes, profRes] = await Promise.all([
+      c.env.DB.prepare('SELECT id, reviewer_name, reviewer_photo, rating, review_text, review_date, relative_time, verified, featured FROM google_reviews WHERE company_id = ? ORDER BY featured DESC, rating DESC, review_date DESC LIMIT 20').bind(companyId).all(),
+      c.env.DB.prepare('SELECT place_id, business_name, average_rating, total_reviews, profile_url, last_synced, sync_enabled FROM google_business_profiles WHERE company_id = ?').bind(companyId).first()
+    ])
+    return c.json({ reviews: rvRes.results || [], profile: profRes || null })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/reviews — list all profiles (super_admin) or own profile (company_admin)
+app.get('/api/reviews', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  if (!c.env?.DB) return c.json({ profiles: [] })
+  try {
+    let res
+    if (user.role === 'super_admin') {
+      res = await c.env.DB.prepare(
+        `SELECT gbp.*, co.name AS company_name, co.key AS company_key,
+         (SELECT COUNT(*) FROM google_reviews gr WHERE gr.company_id = gbp.company_id) AS review_count
+         FROM google_business_profiles gbp JOIN companies co ON gbp.company_id = co.id ORDER BY co.name`
+      ).all()
+    } else {
+      res = await c.env.DB.prepare(
+        `SELECT gbp.*, co.name AS company_name, co.key AS company_key,
+         (SELECT COUNT(*) FROM google_reviews gr WHERE gr.company_id = gbp.company_id) AS review_count
+         FROM google_business_profiles gbp JOIN companies co ON gbp.company_id = co.id WHERE gbp.company_id = ?`
+      ).bind(user.company_id).all()
+    }
+    return c.json({ profiles: res.results || [] })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// PATCH /api/reviews/:review_id/featured — toggle featured status
+app.patch('/api/reviews/:review_id/featured', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  const reviewId = Number(c.req.param('review_id'))
+  const { featured } = await c.req.json()
+  try {
+    // company_admin can only edit their own reviews
+    if (user.role === 'company_admin') {
+      const rv = await c.env.DB.prepare('SELECT company_id FROM google_reviews WHERE id = ?').bind(reviewId).first() as any
+      if (!rv || rv.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+    }
+    await c.env.DB.prepare('UPDATE google_reviews SET featured = ? WHERE id = ?').bind(featured ? 1 : 0, reviewId).run()
+    // Invalidate KV cache for this company
+    if (c.env?.KV) {
+      const rv = await c.env.DB.prepare('SELECT company_id FROM google_reviews WHERE id = ?').bind(reviewId).first() as any
+      if (rv?.company_id) await c.env.KV.delete(`reviews:${rv.company_id}`)
+    }
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: 'Update failed', detail: err?.message }, 500)
   }
 })
 
