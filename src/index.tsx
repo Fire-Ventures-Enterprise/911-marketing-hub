@@ -1433,13 +1433,123 @@ app.get('/api/auth/google/status', async (c) => {
 })
 
 app.post('/api/google-ads/push', async (c) => {
-  const campaign = await c.req.json()
-  const devToken = (c.env as any)?.GOOGLE_ADS_DEVELOPER_TOKEN
-  if (!devToken) {
-    if (c.env?.KV) await c.env.KV.put(`push:${Date.now()}`, JSON.stringify({ campaign: campaign.campaign?.name||'Unknown', status: 'demo', ts: new Date().toISOString() }), { expirationTtl: 60*60*24*30 })
-    return c.json({ success: true, status: 'demo', message: 'Campaign queued (demo mode — add Google Ads API credentials to enable)', campaign: campaign.campaign?.name, timestamp: new Date().toISOString() })
+  const body = await c.req.json()
+  const devToken   = (c.env as any)?.GOOGLE_ADS_DEVELOPER_TOKEN as string | undefined
+  const customerId = ((c.env as any)?.GOOGLE_ADS_CUSTOMER_ID as string | undefined || '').replace(/-/g, '')
+
+  // ── Demo fallback (no credentials) ──────────────────────────────────────
+  if (!devToken || !customerId) {
+    const reason = !devToken ? 'add GOOGLE_ADS_DEVELOPER_TOKEN' : 'add GOOGLE_ADS_CUSTOMER_ID'
+    if (c.env?.KV) await c.env.KV.put(`push:${Date.now()}`, JSON.stringify({ campaign: body.campaign?.name||'Unknown', status: 'demo', ts: new Date().toISOString() }), { expirationTtl: 60*60*24*30 })
+    return c.json({ success: true, status: 'demo', message: `Demo mode — ${reason}`, campaign: body.campaign?.name, timestamp: new Date().toISOString() })
   }
-  return c.json({ success: true, status: 'configured', message: 'Credentials detected — OAuth required', timestamp: new Date().toISOString() })
+
+  // ── Require OAuth token ──────────────────────────────────────────────────
+  const accessToken = c.env?.KV ? await refreshGoogleToken(c.env as any) : null
+  if (!accessToken) {
+    return c.json({ success: false, status: 'auth_required', message: 'Google OAuth not connected — visit /api/auth/google to authenticate' }, 401)
+  }
+
+  const adsBase = `https://googleads.googleapis.com/v18/customers/${customerId}`
+  const headers: Record<string, string> = {
+    'Authorization':    `Bearer ${accessToken}`,
+    'developer-token':  devToken,
+    'login-customer-id': customerId,
+    'Content-Type':     'application/json'
+  }
+
+  try {
+    // 1. Campaign budget (parse "$30/day CAD" → micros)
+    const budgetMatch = (body.campaign?.budget || '$10').match(/\$?(\d+(?:\.\d+)?)/)
+    const dailyBudgetMicros = String(Math.round(parseFloat(budgetMatch?.[1] || '10') * 1_000_000))
+    const budgetRes  = await fetch(`${adsBase}/campaignBudgets:mutate`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ operations: [{ create: { name: `${body.campaign?.name} Budget`, amountMicros: dailyBudgetMicros, deliveryMethod: 'STANDARD' } }] })
+    })
+    const budgetData = await budgetRes.json() as any
+    if (!budgetRes.ok) throw new Error(`Budget: ${JSON.stringify(budgetData?.error || budgetData)}`)
+    const budgetResource = budgetData.results?.[0]?.resourceName as string
+
+    // 2. Campaign (created PAUSED — user activates manually)
+    const campaignRes  = await fetch(`${adsBase}/campaigns:mutate`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ operations: [{ create: {
+        name:                     body.campaign?.name,
+        advertisingChannelType:   'SEARCH',
+        status:                   'PAUSED',
+        campaignBudget:           budgetResource,
+        maximizeConversions:      {},
+        networkSettings:          { targetGoogleSearch: true, targetSearchNetwork: true, targetContentNetwork: false, targetPartnerSearchNetwork: false },
+        geoTargetTypeSetting:     { positiveGeoTargetType: 'PRESENCE_OR_INTEREST' }
+      } }] })
+    })
+    const campaignData = await campaignRes.json() as any
+    if (!campaignRes.ok) throw new Error(`Campaign: ${JSON.stringify(campaignData?.error || campaignData)}`)
+    const campaignResource = campaignData.results?.[0]?.resourceName as string
+
+    // 3. Ad group
+    const adGroupRes  = await fetch(`${adsBase}/adGroups:mutate`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ operations: [{ create: {
+        name:          body.adGroup?.name || `${body.campaign?.name} Ad Group`,
+        campaign:      campaignResource,
+        status:        'ENABLED',
+        type:          'SEARCH_STANDARD',
+        cpcBidMicros:  '4500000'
+      } }] })
+    })
+    const adGroupData = await adGroupRes.json() as any
+    if (!adGroupRes.ok) throw new Error(`AdGroup: ${JSON.stringify(adGroupData?.error || adGroupData)}`)
+    const adGroupResource = adGroupData.results?.[0]?.resourceName as string
+
+    // 4. Keywords
+    const matchTypeMap: Record<string, string> = { Exact: 'EXACT', Phrase: 'PHRASE', Broad: 'BROAD' }
+    const kwOps = (body.adGroup?.keywords || []).map((kw: any) => ({
+      create: { adGroup: adGroupResource, keyword: { text: kw.text.replace(/[\[\]"]/g, ''), matchType: matchTypeMap[kw.match] || 'PHRASE' }, status: 'ENABLED' }
+    }))
+    if (kwOps.length > 0) {
+      const kwRes = await fetch(`${adsBase}/adGroupCriteria:mutate`, { method: 'POST', headers, body: JSON.stringify({ operations: kwOps }) })
+      if (!kwRes.ok) console.error('[GAds keywords]', JSON.stringify(await kwRes.json()))
+    }
+
+    // 5. Responsive Search Ad
+    const ad = body.ads?.[0]
+    if (ad) {
+      const headlines    = (ad.headlines    || []).slice(0, 15).map((h: string) => ({ text: h.slice(0, 30) }))
+      const descriptions = (ad.descriptions || []).slice(0,  4).map((d: string) => ({ text: d.slice(0, 90) }))
+      const adRes = await fetch(`${adsBase}/adGroupAds:mutate`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ operations: [{ create: {
+          adGroup: adGroupResource, status: 'PAUSED',
+          ad: { responsiveSearchAd: { headlines, descriptions }, finalUrls: [ad.finalUrl || `https://example.com`] }
+        } }] })
+      })
+      if (!adRes.ok) console.error('[GAds RSA]', JSON.stringify(await adRes.json()))
+    }
+
+    // 6. Callout extension
+    if ((body.extensions?.callouts || []).length > 0) {
+      const calloutOps = [{ create: {
+        campaign: campaignResource,
+        calloutFeedItem: { calloutText: body.extensions.callouts.slice(0, 4).map((t: string) => t.slice(0, 25)) }
+      } }]
+      const extRes = await fetch(`${adsBase}/campaignExtensionSettings:mutate`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ operations: calloutOps })
+      })
+      if (!extRes.ok) console.error('[GAds callouts]', JSON.stringify(await extRes.json()))
+    }
+
+    const result = { campaign: body.campaign?.name, status: 'live', campaignResource, adGroupResource, ts: new Date().toISOString() }
+    if (c.env?.KV) await c.env.KV.put(`push:${Date.now()}`, JSON.stringify(result), { expirationTtl: 60*60*24*30 })
+
+    return c.json({ success: true, status: 'live', message: 'Campaign created in Google Ads (PAUSED — enable in console)', campaign: body.campaign?.name, campaignResource, adGroupResource, timestamp: new Date().toISOString() })
+
+  } catch (err: any) {
+    console.error('[GAds push]', err?.message)
+    if (c.env?.KV) await c.env.KV.put(`push:${Date.now()}`, JSON.stringify({ campaign: body.campaign?.name||'Unknown', status: 'error', error: err?.message, ts: new Date().toISOString() }), { expirationTtl: 60*60*24*30 })
+    return c.json({ success: false, status: 'error', error: err?.message, campaign: body.campaign?.name, timestamp: new Date().toISOString() }, 500)
+  }
 })
 
 app.get('/api/google-ads/history', async (c) => {

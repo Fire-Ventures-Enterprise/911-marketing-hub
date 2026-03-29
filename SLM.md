@@ -210,6 +210,17 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - Admin sidebar now has "Images" pane with: template hero upload (by template + niche), domain image upload (by domain + type), template browser with color swatches + usage counts, image library with approval workflow
 - `domains.template` column added (0009): `INTEGER DEFAULT NULL` — NULL means rotation will assign next template; set by endpoint after first generation; admin can override by setting directly in D1
 - **Template locking**: once a domain gets a template assigned, it always serves that template for consistency — prevents jarring changes for repeat visitors
+- **Google Ads API credentials (all 6 confirmed in CF Pages secrets, 2026-03-28):** `GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CUSTOMER_ID`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`, `PORKBUN_API_KEY`, `PORKBUN_SECRET_KEY`
+- **`wrangler pages secret put` non-interactive pitfall**: running the command without piping a value in CI/non-TTY environments stores an empty string silently — always use `echo "VALUE" | npx wrangler pages secret put KEY --project-name PROJECT` to guarantee a non-empty value is stored
+- **`POST /api/google-ads/push` is now real (Google Ads API v18)**: demo guard removed; when `devToken` + `customerId` are present and OAuth token exists in KV, creates a full campaign (budget → campaign PAUSED → ad group → keywords → RSA → callout extension) via 5 sequential REST calls; returns `status: 'live'` with `campaignResource` + `adGroupResource` resource names on success
+- **Campaign created as PAUSED**: all Google Ads campaigns pushed from the hub are created in `PAUSED` status — user must manually enable in Google Ads console to start spending; prevents accidental budget burn
+- **`customerId` strip hyphens**: Google Ads REST API requires customer ID without dashes (e.g., `1234567890` not `123-456-7890`) — always `.replace(/-/g, '')` before use in API URLs
+- **Push endpoint error handling**: Google Ads API errors are JSON bodies; always do `JSON.stringify(data?.error || data)` in the `throw` to capture the full error structure, not just `data.message`
+- **Keyword `matchType` mapping**: `generateAdsCampaign` output uses display strings (`Exact`, `Phrase`, `Broad`); Google Ads API v18 requires uppercase enum strings (`EXACT`, `PHRASE`, `BROAD`) — map before sending
+- **RSA headline truncation**: Google Ads API rejects headlines > 30 chars and descriptions > 90 chars — always `.slice(0, 30)` / `.slice(0, 90)` before sending; max 15 headlines, 4 descriptions per RSA
+- **Push history in KV**: every push (live, demo, error) is recorded to KV with key `push:{timestamp}` and 30-day TTL — `GET /api/google-ads/history` returns last 20 entries
+- **Google OAuth flow uses dynamic origin**: `new URL(c.req.url).origin + '/api/auth/google/callback'` — no hardcoded URL anywhere in backend; automatically resolves to `slm-hub.ca` when accessed via that domain; no update needed when domain changes
+- **`serviceleads.html` OAuth docs**: already shows `https://slm-hub.ca/api/auth/google/callback` as the correct callback URI to register in Google Cloud Console — no changes needed to frontend docs
 
 ---
 
