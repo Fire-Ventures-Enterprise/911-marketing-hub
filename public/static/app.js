@@ -224,31 +224,45 @@ function _renderDashboardCompanies() {
     if (d.status === 'Parked')   parkedByKey[d.co]   = (parkedByKey[d.co]   || 0) + 1;
   });
 
+  const chevronSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+
   el.innerHTML = allCompanies.map(co => {
-    const accent    = co.color_accent || '#CC0000';
-    const total     = totalByKey[co.key]    || 0;
-    const active    = activeByKey[co.key]   || 0;
-    const building  = buildingByKey[co.key] || 0;
-    const parked    = parkedByKey[co.key]   || 0;
+    const accent   = co.color_accent || '#CC0000';
+    const total    = totalByKey[co.key]    || 0;
+    const active   = activeByKey[co.key]   || 0;
+    const building = buildingByKey[co.key] || 0;
+    const parked   = parkedByKey[co.key]   || 0;
+
+    // Status dot: green if any active, blue if building only, gray if none
+    const dotCls  = active > 0 ? 'co-dot-green' : building > 0 ? 'co-dot-blue' : 'co-dot-gray';
+    const dotLbl  = active > 0 ? 'Active' : building > 0 ? 'Building' : 'Inactive';
 
     const pills = [
-      active   ? `<span class="co-status-pill co-sp-active">${active} Active</span>`     : '',
+      active   ? `<span class="co-status-pill co-sp-active">${active} Active</span>`       : '',
       building ? `<span class="co-status-pill co-sp-building">${building} Building</span>` : '',
-      parked   ? `<span class="co-status-pill co-sp-parked">${parked} Parked</span>`      : '',
-    ].filter(Boolean).join('');
+      parked   ? `<span class="co-status-pill co-sp-parked">${parked} Parked</span>`       : '',
+    ].filter(Boolean).join('') || `<span class="co-status-pill co-sp-parked">0 domains</span>`;
 
     return `<div class="co-card" id="co-dash-${co.id}" style="--ca:${accent}" onclick="expandDashCard(${co.id},this)">
-      <div class="co-card-header">
-        <div style="min-width:0;flex:1">
-          <div class="co-name">${co.name}</div>
-          <div class="co-meta">${co.phone || '—'} &middot; ${total} domain${total !== 1 ? 's' : ''}</div>
-          <div style="margin-top:6px;line-height:1">${pills || '<span class="co-status-pill co-sp-parked">0 domains</span>'}</div>
+      <div class="co-card-hd">
+        <div class="co-card-header">
+          <div class="co-card-title-block">
+            <div class="co-name">${co.name}</div>
+            <div class="co-sub">${co.phone || '—'} &middot; ${total} domain${total !== 1 ? 's' : ''}</div>
+          </div>
+          <div class="co-card-right">
+            <div class="co-status-dot">
+              <div class="co-dot-circle ${dotCls}"></div>
+              <span class="co-dot-label">${dotLbl}</span>
+            </div>
+            <div class="co-chevron">${chevronSvg}</div>
+          </div>
         </div>
-        <div class="co-chevron">▾</div>
+        <div class="co-pills-row">${pills}</div>
       </div>
       <div class="co-expand" id="co-exp-${co.id}">
         <div class="co-expand-inner" id="co-exp-inner-${co.id}">
-          <div style="color:var(--tx3);font-size:12px">Loading…</div>
+          <div style="color:var(--tx3);font-size:12px;padding:8px 0">Loading…</div>
         </div>
       </div>
     </div>`;
@@ -275,7 +289,7 @@ async function expandDashCard(coId, cardEl) {
   cardEl.classList.add('expanded');
 
   const inner = document.getElementById('co-exp-inner-' + coId);
-  if (inner) inner.innerHTML = '<div style="color:var(--tx3);font-size:12px">Loading…</div>';
+  if (inner) inner.innerHTML = '<div style="color:var(--tx3);font-size:12px;padding:8px 0">Loading…</div>';
 
   try {
     const r = await fetch(`/api/companies/${coId}/summary`, {
@@ -283,7 +297,7 @@ async function expandDashCard(coId, cardEl) {
     });
     const d = await r.json();
     if (!r.ok) {
-      if (inner) inner.innerHTML = `<div style="color:#f87171;font-size:12px">${d.error || 'Load failed'}</div>`;
+      if (inner) inner.innerHTML = `<div style="color:#f87171;font-size:12px;padding:8px 0">${d.error || 'Load failed'}</div>`;
       return;
     }
 
@@ -291,42 +305,61 @@ async function expandDashCard(coId, cardEl) {
     const co     = allCompanies.find(c => c.id === coId) || {};
     const budget = co.budget     ? `$${Number(co.budget).toLocaleString()}/day` : '—';
     const cpa    = co.target_cpa ? `$${co.target_cpa}` : '—';
+    const leads  = d.lead_count || 0;
 
-    // GBP status
-    const gbpHtml = d.gbp_connected
-      ? `<span style="color:#4ade80">✅ ${d.gbp_name || 'Connected'}</span>`
-      : `<span style="color:#94a3b8">❌ Not connected</span>`;
+    // Performance badge based on lead count
+    let perfBadgeCls = 'co-pb-none', perfBadgeTxt = 'No Data';
+    if (leads >= 50)      { perfBadgeCls = 'co-pb-top';     perfBadgeTxt = 'Top Performer'; }
+    else if (leads >= 10) { perfBadgeCls = 'co-pb-good';    perfBadgeTxt = 'Good';          }
+    else if (leads > 0)   { perfBadgeCls = 'co-pb-growing'; perfBadgeTxt = 'Growing';       }
 
-    // Domain tags (max 10 shown, "+N more" overflow)
+    // GBP metric value + class
+    const gbpVal = d.gbp_connected ? (d.gbp_name || 'Connected') : 'Not connected';
+    const gbpCls = d.gbp_connected ? 'green' : 'muted';
+
+    // Domain tags (max 12 shown, "+N more" overflow)
     const domains  = d.domains || [];
-    const MAX_SHOW = 10;
+    const MAX_SHOW = 12;
     const shown    = domains.slice(0, MAX_SHOW);
     const extra    = domains.length - MAX_SHOW;
     const domTagsHtml = domains.length
-      ? `<div style="margin-top:6px">${
-          shown.map(dm => {
-            const cls = dm.status === 'Active' ? 'co-dt-active' : dm.status === 'Building' ? 'co-dt-building' : 'co-dt-parked';
-            return `<span class="co-dom-tag ${cls}" title="${dm.status}">${dm.domain}</span>`;
-          }).join('')
-        }${extra > 0 ? `<span class="co-dom-tag co-dt-parked">+${extra} more</span>` : ''}</div>`
-      : '<div style="color:var(--tx3);font-size:12px;margin-top:4px">No domains yet</div>';
+      ? shown.map(dm => {
+          const cls = dm.status === 'Active' ? 'co-dt-active' : dm.status === 'Building' ? 'co-dt-building' : 'co-dt-parked';
+          return `<span class="co-dom-tag ${cls}" title="${dm.status}">${dm.domain}</span>`;
+        }).join('') + (extra > 0 ? `<span class="co-dom-tag co-dt-parked">+${extra} more</span>` : '')
+      : '<span style="color:var(--tx3);font-size:12px">No domains yet</span>';
 
     if (inner) inner.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:12px;margin-bottom:10px">
-        <div><span style="color:var(--tx3)">Leads:</span> <strong style="color:var(--tx)">${d.lead_count || 0}</strong></div>
-        <div><span style="color:var(--tx3)">Budget:</span> <strong style="color:var(--tx)">${budget}</strong></div>
-        <div><span style="color:var(--tx3)">Target CPA:</span> <strong style="color:var(--tx)">${cpa}</strong></div>
-        <div><span style="color:var(--tx3)">GBP:</span> ${gbpHtml}</div>
+      <div class="co-metrics-grid">
+        <div class="co-metric">
+          <div class="co-metric-label"><span class="co-metric-icon">📥</span>Leads</div>
+          <div class="co-metric-val ${leads > 0 ? 'green' : 'muted'}">${leads}</div>
+        </div>
+        <div class="co-metric">
+          <div class="co-metric-label"><span class="co-metric-icon">💰</span>Budget</div>
+          <div class="co-metric-val ${budget !== '—' ? '' : 'muted'}">${budget}</div>
+        </div>
+        <div class="co-metric">
+          <div class="co-metric-label"><span class="co-metric-icon">🎯</span>Target CPA</div>
+          <div class="co-metric-val ${cpa !== '—' ? '' : 'muted'}">${cpa}</div>
+        </div>
+        <div class="co-metric">
+          <div class="co-metric-label"><span class="co-metric-icon">📍</span>GBP</div>
+          <div class="co-metric-val ${gbpCls}" title="${gbpVal}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100px">${gbpVal}</div>
+        </div>
       </div>
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:2px">Domains (${domains.length})</div>
-      ${domTagsHtml}
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px" onclick="event.stopPropagation()">
-        <button class="btn btn-sec btn-sm" onclick="_dashViewDomains('${co.key}')">📋 View Domains</button>
-        <button class="btn btn-sec btn-sm" onclick="showSection('leads')">📥 View Leads</button>
+      <span class="co-perf-badge ${perfBadgeCls}">${perfBadgeTxt}</span>
+      <div class="co-domains-section">
+        <div class="co-domains-label">Domains <span style="opacity:.55">(${domains.length})</span></div>
+        <div class="co-domains-tags">${domTagsHtml}</div>
+      </div>
+      <div class="co-actions" onclick="event.stopPropagation()">
+        <button class="btn btn-sec btn-sm" onclick="_dashViewDomains('${co.key}')">📋 Domains</button>
+        <button class="btn btn-sec btn-sm" onclick="showSection('leads')">📥 Leads</button>
         <button class="btn btn-primary btn-sm" onclick="_dashGenerateLP('${co.key}')">⚡ Generate LP</button>
       </div>`;
   } catch {
-    if (inner) inner.innerHTML = '<div style="color:#f87171;font-size:12px">Failed to load summary</div>';
+    if (inner) inner.innerHTML = '<div style="color:#f87171;font-size:12px;padding:8px 0">Failed to load summary</div>';
   }
 }
 
