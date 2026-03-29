@@ -221,6 +221,12 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **Push history in KV**: every push (live, demo, error) is recorded to KV with key `push:{timestamp}` and 30-day TTL — `GET /api/google-ads/history` returns last 20 entries
 - **Google OAuth flow uses dynamic origin**: `new URL(c.req.url).origin + '/api/auth/google/callback'` — no hardcoded URL anywhere in backend; automatically resolves to `slm-hub.ca` when accessed via that domain; no update needed when domain changes
 - **`serviceleads.html` OAuth docs**: already shows `https://slm-hub.ca/api/auth/google/callback` as the correct callback URI to register in Google Cloud Console — no changes needed to frontend docs
+- **`invalid_client` root cause**: Google Ads secrets were added to CF Pages AFTER the last deployment — secrets only take effect on next deploy; the live Worker had `undefined` for `GOOGLE_ADS_CLIENT_ID`, sending `client_id=undefined` to Google which returns `Error 401: invalid_client`
+- **Always redeploy after adding/updating CF Pages secrets** — `wrangler pages secret put` alone is not enough; a `npm run deploy` must follow or the Worker continues running with the old (missing) values
+- **Add all env secrets to `Bindings` type** — accessing secrets via `(c.env as any)?.KEY` compiles fine but masks missing-secret bugs at TypeScript level; always add secrets to `Bindings` so `c.env.KEY` is typed and IDE-checked; removed all `as any` casts for Google Ads keys
+- **`refreshGoogleToken` signature updated** to accept `Bindings` directly (was `Bindings & Record<string, any>`) — `GOOGLE_ADS_CLIENT_ID` and `GOOGLE_ADS_CLIENT_SECRET` are now proper typed fields
+- **OAuth callback now shows Google error detail** — if token exchange fails, page renders `tokens.error` + `tokens.error_description` for debugging; also shows missing-credentials error before even calling Google token endpoint
+- **`encodeURIComponent(clientId)` added to OAuth redirect URL** — `client_id` is already URI-safe but encoding it is defensive best practice; redirect_uri and scope were already encoded
 
 ---
 

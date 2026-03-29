@@ -9,6 +9,10 @@ type Bindings = {
   IMAGES: R2Bucket
   PORKBUN_API_KEY: string
   PORKBUN_SECRET_KEY: string
+  GOOGLE_ADS_DEVELOPER_TOKEN: string
+  GOOGLE_ADS_CUSTOMER_ID: string
+  GOOGLE_ADS_CLIENT_ID: string
+  GOOGLE_ADS_CLIENT_SECRET: string
 }
 type User = { id: string; email: string; role: string; company_id: number | null; name: string; company_key: string | null }
 type Variables = { user: User }
@@ -904,7 +908,7 @@ function scoreKeyword(
   return { score, intent, matchType }
 }
 
-async function refreshGoogleToken(env: Bindings & Record<string, any>): Promise<string | null> {
+async function refreshGoogleToken(env: Bindings): Promise<string | null> {
   try {
     const stored = await env.KV?.get('google_oauth_tokens')
     if (!stored) return null
@@ -1000,9 +1004,9 @@ app.post('/api/keywords/research', async (c) => {
     let connectMessage: string | null = null
 
     // ── Source 1: Google Keyword Planner ─────────────────────────────────
-    const devToken    = (c.env as any)?.GOOGLE_ADS_DEVELOPER_TOKEN
-    const customerId  = (c.env as any)?.GOOGLE_ADS_CUSTOMER_ID
-    const accessToken = c.env?.KV ? await refreshGoogleToken(c.env as any) : null
+    const devToken    = c.env?.GOOGLE_ADS_DEVELOPER_TOKEN
+    const customerId  = c.env?.GOOGLE_ADS_CUSTOMER_ID
+    const accessToken = c.env?.KV ? await refreshGoogleToken(c.env) : null
 
     if (devToken && customerId && accessToken) {
       try {
@@ -1406,22 +1410,25 @@ app.get('/api/auth/me', async (c) => {
 })
 
 app.get('/api/auth/google', (c) => {
-  const clientId = (c.env as any)?.GOOGLE_ADS_CLIENT_ID
-  if (!clientId) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>Google Ads not configured</h2><p>Add GOOGLE_ADS_CLIENT_ID to env.</p><a href="/app" style="color:#388bfd">Back</a></body></html>')
+  const clientId = c.env?.GOOGLE_ADS_CLIENT_ID
+  if (!clientId) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>Google Ads not configured</h2><p>Add GOOGLE_ADS_CLIENT_ID as a Cloudflare Pages secret.</p><a href="/app" style="color:#388bfd">Back</a></body></html>')
   const redirectUri = new URL(c.req.url).origin + '/api/auth/google/callback'
-  return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent('https://www.googleapis.com/auth/adwords')}&access_type=offline&prompt=consent`)
+  return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent('https://www.googleapis.com/auth/adwords')}&access_type=offline&prompt=consent`)
 })
 
 app.get('/api/auth/google/callback', async (c) => {
   const code = c.req.query('code')
-  const clientId = (c.env as any)?.GOOGLE_ADS_CLIENT_ID
-  const clientSecret = (c.env as any)?.GOOGLE_ADS_CLIENT_SECRET
+  const clientId = c.env?.GOOGLE_ADS_CLIENT_ID
+  const clientSecret = c.env?.GOOGLE_ADS_CLIENT_SECRET
   const redirectUri = new URL(c.req.url).origin + '/api/auth/google/callback'
-  if (!code) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>Auth Failed</h2><a href="/app">Back</a></body></html>')
+  const errorParam = c.req.query('error')
+  if (!code) return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff"><h2>❌ Auth Failed</h2><p style="color:#f87171">Google returned: ${errorParam || 'no code'}</p><a href="/app" style="color:#388bfd">Back</a></body></html>`)
+  if (!clientId || !clientSecret) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>❌ Missing credentials</h2><p style="color:#f87171">GOOGLE_ADS_CLIENT_ID or GOOGLE_ADS_CLIENT_SECRET not set in Cloudflare secrets.</p><a href="/app" style="color:#388bfd">Back</a></body></html>')
   const tokenRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' }) })
   const tokens = await tokenRes.json() as any
   if (tokens.access_token && c.env?.KV) await c.env.KV.put('google_oauth_tokens', JSON.stringify({ ...tokens, stored_at: Date.now() }), { expirationTtl: 60*60*24*30 })
-  return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff"><h2>${tokens.access_token ? '✅ Connected!' : '❌ Failed'}</h2><a href="/app" style="color:#388bfd">Back to Hub</a></body></html>`)
+  const errDetail = tokens.error ? `<p style="color:#f87171">Error: ${tokens.error} — ${tokens.error_description || ''}</p>` : ''
+  return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff"><h2>${tokens.access_token ? '✅ Google Ads Connected!' : '❌ Token Exchange Failed'}</h2>${errDetail}<a href="/app" style="color:#388bfd">Back to Hub</a></body></html>`)
 })
 
 app.get('/api/auth/google/status', async (c) => {
@@ -1434,8 +1441,8 @@ app.get('/api/auth/google/status', async (c) => {
 
 app.post('/api/google-ads/push', async (c) => {
   const body = await c.req.json()
-  const devToken   = (c.env as any)?.GOOGLE_ADS_DEVELOPER_TOKEN as string | undefined
-  const customerId = ((c.env as any)?.GOOGLE_ADS_CUSTOMER_ID as string | undefined || '').replace(/-/g, '')
+  const devToken   = c.env?.GOOGLE_ADS_DEVELOPER_TOKEN
+  const customerId = (c.env?.GOOGLE_ADS_CUSTOMER_ID || '').replace(/-/g, '')
 
   // ── Demo fallback (no credentials) ──────────────────────────────────────
   if (!devToken || !customerId) {
@@ -1445,7 +1452,7 @@ app.post('/api/google-ads/push', async (c) => {
   }
 
   // ── Require OAuth token ──────────────────────────────────────────────────
-  const accessToken = c.env?.KV ? await refreshGoogleToken(c.env as any) : null
+  const accessToken = c.env?.KV ? await refreshGoogleToken(c.env) : null
   if (!accessToken) {
     return c.json({ success: false, status: 'auth_required', message: 'Google OAuth not connected — visit /api/auth/google to authenticate' }, 401)
   }
