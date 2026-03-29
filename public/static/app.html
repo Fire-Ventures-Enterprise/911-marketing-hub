@@ -556,7 +556,7 @@
     /* ── COMPANY CARDS ── */
     .co-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 12px;
       margin-bottom: 0;
     }
@@ -566,10 +566,31 @@
       border-radius: 12px;
       padding: 18px;
       border-top: 3px solid var(--ca, #CC0000);
+      cursor: pointer;
+      transition: border-color .2s, box-shadow .2s;
     }
-    .co-name { font-size: 14px; font-weight: 800; color: var(--tx); margin-bottom: 8px; }
-    .co-meta { font-size: 12px; color: var(--tx3); line-height: 1.9; }
+    .co-card:hover { border-color: var(--ca, #CC0000); }
+    .co-card.expanded {
+      border-color: var(--ca, #CC0000);
+      box-shadow: 0 0 0 1px var(--ca, #CC0000);
+    }
+    .co-card-header { display:flex;align-items:flex-start;justify-content:space-between;gap:8px; }
+    .co-chevron { font-size:11px;color:var(--tx3);transition:transform .25s;flex-shrink:0;margin-top:3px;line-height:1;user-select:none; }
+    .co-card.expanded .co-chevron { transform:rotate(180deg); }
+    .co-name { font-size: 14px; font-weight: 800; color: var(--tx); margin-bottom: 4px; }
+    .co-meta { font-size: 12px; color: var(--tx3); line-height: 1.7; }
     .co-meta a { color: var(--ca, #CC0000); }
+    .co-status-pill { display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;text-transform:uppercase;letter-spacing:.04em;margin-right:3px; }
+    .co-sp-active   { background:rgba(74,222,128,.15);color:#4ade80; }
+    .co-sp-building { background:rgba(96,165,250,.15);color:#60a5fa; }
+    .co-sp-parked   { background:rgba(148,163,184,.12);color:#94a3b8; }
+    .co-expand { max-height:0;overflow:hidden;transition:max-height .35s ease; }
+    .co-card.expanded .co-expand { max-height:800px; }
+    .co-expand-inner { padding-top:12px;margin-top:12px;border-top:1px solid var(--bd); }
+    .co-dom-tag { display:inline-block;font-size:10px;font-weight:600;padding:2px 6px;border-radius:6px;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:2px; }
+    .co-dt-active   { background:rgba(74,222,128,.12);color:#4ade80; }
+    .co-dt-building { background:rgba(96,165,250,.12);color:#60a5fa; }
+    .co-dt-parked   { background:rgba(148,163,184,.1);color:#94a3b8; }
 
     /* ── TOAST ── */
     .toast {

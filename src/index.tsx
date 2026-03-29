@@ -1313,6 +1313,43 @@ app.patch('/api/companies/:id', async (c) => {
   }
 })
 
+// ── COMPANY SUMMARY (dashboard expand) ───────────────────────────────────────
+app.get('/api/companies/:id/summary', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+
+  const id = Number(c.req.param('id'))
+  if (!id) return c.json({ error: 'Invalid id' }, 400)
+
+  // Non-super_admin users may only fetch their own company
+  if (user.role !== 'super_admin' && Number(user.company_id) !== id) {
+    return c.json({ error: 'Forbidden' }, 403)
+  }
+
+  try {
+    const [domainsRes, leadsRes, gbpRes] = await c.env.DB.batch([
+      c.env.DB.prepare(
+        'SELECT id, domain, status FROM domains WHERE company = (SELECT key FROM companies WHERE id = ?) ORDER BY status, domain'
+      ).bind(id),
+      c.env.DB.prepare(
+        'SELECT COUNT(*) as cnt FROM leads WHERE company = (SELECT key FROM companies WHERE id = ?)'
+      ).bind(id),
+      c.env.DB.prepare(
+        'SELECT business_name FROM google_business_profiles WHERE company_id = ?'
+      ).bind(id)
+    ])
+    return c.json({
+      domains:       domainsRes.results || [],
+      lead_count:    (leadsRes.results?.[0] as any)?.cnt || 0,
+      gbp_connected: (gbpRes.results?.length || 0) > 0,
+      gbp_name:      (gbpRes.results?.[0] as any)?.business_name || null
+    })
+  } catch {
+    return c.json({ error: 'Failed to load summary' }, 500)
+  }
+})
+
 // ── LP CHECKLIST VALIDATOR ────────────────────────────────────────────────────
 function validateLP(html: string, mode: 'ppc' | 'seo'): { passed: string[]; warnings: string[] } {
   const passed: string[]   = []

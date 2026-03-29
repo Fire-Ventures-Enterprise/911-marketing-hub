@@ -212,21 +212,137 @@ function _renderDashboardCompanies() {
   const el = document.getElementById('dash-companies');
   if (!el || !allCompanies.length) return;
 
-  const countByKey = {};
-  allDomains.forEach(d => { countByKey[d.co] = (countByKey[d.co] || 0) + 1; });
+  // Build per-company domain counts by status from the already-loaded allDomains
+  const totalByKey    = {};
+  const activeByKey   = {};
+  const buildingByKey = {};
+  const parkedByKey   = {};
+  allDomains.forEach(d => {
+    totalByKey[d.co]    = (totalByKey[d.co]    || 0) + 1;
+    if (d.status === 'Active')   activeByKey[d.co]   = (activeByKey[d.co]   || 0) + 1;
+    if (d.status === 'Building') buildingByKey[d.co] = (buildingByKey[d.co] || 0) + 1;
+    if (d.status === 'Parked')   parkedByKey[d.co]   = (parkedByKey[d.co]   || 0) + 1;
+  });
 
   el.innerHTML = allCompanies.map(co => {
-    const accent = co.color_accent || '#CC0000';
-    const count  = countByKey[co.key] || 0;
-    return `<div class="co-card" style="--ca:${accent}">
-      <div class="co-name">${co.name}</div>
-      <div class="co-meta">
-        ${count} domains &middot; ${co.phone}<br>
-        $${co.budget}/day &middot; Target CPA $${co.target_cpa}<br>
-        <a href="https://${co.domain}" target="_blank">${co.domain}</a>
+    const accent    = co.color_accent || '#CC0000';
+    const total     = totalByKey[co.key]    || 0;
+    const active    = activeByKey[co.key]   || 0;
+    const building  = buildingByKey[co.key] || 0;
+    const parked    = parkedByKey[co.key]   || 0;
+
+    const pills = [
+      active   ? `<span class="co-status-pill co-sp-active">${active} Active</span>`     : '',
+      building ? `<span class="co-status-pill co-sp-building">${building} Building</span>` : '',
+      parked   ? `<span class="co-status-pill co-sp-parked">${parked} Parked</span>`      : '',
+    ].filter(Boolean).join('');
+
+    return `<div class="co-card" id="co-dash-${co.id}" style="--ca:${accent}" onclick="expandDashCard(${co.id},this)">
+      <div class="co-card-header">
+        <div style="min-width:0;flex:1">
+          <div class="co-name">${co.name}</div>
+          <div class="co-meta">${co.phone || '—'} &middot; ${total} domain${total !== 1 ? 's' : ''}</div>
+          <div style="margin-top:6px;line-height:1">${pills || '<span class="co-status-pill co-sp-parked">0 domains</span>'}</div>
+        </div>
+        <div class="co-chevron">▾</div>
+      </div>
+      <div class="co-expand" id="co-exp-${co.id}">
+        <div class="co-expand-inner" id="co-exp-inner-${co.id}">
+          <div style="color:var(--tx3);font-size:12px">Loading…</div>
+        </div>
       </div>
     </div>`;
   }).join('');
+}
+
+// ── DASHBOARD CARD EXPAND ─────────────────────────────────────────────────
+
+let _dashExpandedId = null;
+
+async function expandDashCard(coId, cardEl) {
+  // Same card clicked → collapse
+  if (_dashExpandedId === coId) {
+    cardEl.classList.remove('expanded');
+    _dashExpandedId = null;
+    return;
+  }
+  // Collapse previously expanded card
+  if (_dashExpandedId !== null) {
+    const prev = document.getElementById('co-dash-' + _dashExpandedId);
+    if (prev) prev.classList.remove('expanded');
+  }
+  _dashExpandedId = coId;
+  cardEl.classList.add('expanded');
+
+  const inner = document.getElementById('co-exp-inner-' + coId);
+  if (inner) inner.innerHTML = '<div style="color:var(--tx3);font-size:12px">Loading…</div>';
+
+  try {
+    const r = await fetch(`/api/companies/${coId}/summary`, {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      if (inner) inner.innerHTML = `<div style="color:#f87171;font-size:12px">${d.error || 'Load failed'}</div>`;
+      return;
+    }
+
+    // Company meta (already in allCompanies)
+    const co     = allCompanies.find(c => c.id === coId) || {};
+    const budget = co.budget     ? `$${Number(co.budget).toLocaleString()}/day` : '—';
+    const cpa    = co.target_cpa ? `$${co.target_cpa}` : '—';
+
+    // GBP status
+    const gbpHtml = d.gbp_connected
+      ? `<span style="color:#4ade80">✅ ${d.gbp_name || 'Connected'}</span>`
+      : `<span style="color:#94a3b8">❌ Not connected</span>`;
+
+    // Domain tags (max 10 shown, "+N more" overflow)
+    const domains  = d.domains || [];
+    const MAX_SHOW = 10;
+    const shown    = domains.slice(0, MAX_SHOW);
+    const extra    = domains.length - MAX_SHOW;
+    const domTagsHtml = domains.length
+      ? `<div style="margin-top:6px">${
+          shown.map(dm => {
+            const cls = dm.status === 'Active' ? 'co-dt-active' : dm.status === 'Building' ? 'co-dt-building' : 'co-dt-parked';
+            return `<span class="co-dom-tag ${cls}" title="${dm.status}">${dm.domain}</span>`;
+          }).join('')
+        }${extra > 0 ? `<span class="co-dom-tag co-dt-parked">+${extra} more</span>` : ''}</div>`
+      : '<div style="color:var(--tx3);font-size:12px;margin-top:4px">No domains yet</div>';
+
+    if (inner) inner.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:12px;margin-bottom:10px">
+        <div><span style="color:var(--tx3)">Leads:</span> <strong style="color:var(--tx)">${d.lead_count || 0}</strong></div>
+        <div><span style="color:var(--tx3)">Budget:</span> <strong style="color:var(--tx)">${budget}</strong></div>
+        <div><span style="color:var(--tx3)">Target CPA:</span> <strong style="color:var(--tx)">${cpa}</strong></div>
+        <div><span style="color:var(--tx3)">GBP:</span> ${gbpHtml}</div>
+      </div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:2px">Domains (${domains.length})</div>
+      ${domTagsHtml}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px" onclick="event.stopPropagation()">
+        <button class="btn btn-sec btn-sm" onclick="_dashViewDomains('${co.key}')">📋 View Domains</button>
+        <button class="btn btn-sec btn-sm" onclick="showSection('leads')">📥 View Leads</button>
+        <button class="btn btn-primary btn-sm" onclick="_dashGenerateLP('${co.key}')">⚡ Generate LP</button>
+      </div>`;
+  } catch {
+    if (inner) inner.innerHTML = '<div style="color:#f87171;font-size:12px">Failed to load summary</div>';
+  }
+}
+
+// Navigate to Domains tab filtered to one company key
+function _dashViewDomains(coKey) {
+  showSection('domains');
+  // Reset all filter tabs, then render filtered domains for this company
+  document.querySelectorAll('.ftab').forEach(t => t.classList.remove('active'));
+  renderDomains(allDomains.filter(d => d.co === coKey));
+}
+
+// Navigate to Landing tab with company pre-selected
+function _dashGenerateLP(coKey) {
+  showSection('landing');
+  const sel = document.getElementById('lp-company');
+  if (sel) sel.value = coKey;
 }
 
 // ── DOMAIN DROPDOWN ───────────────────────────────────────────────────────
