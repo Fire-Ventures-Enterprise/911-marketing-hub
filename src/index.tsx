@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from 'hono/cloudflare-workers'
-import { APP_HTML, SERVICE_LEADS_HTML, LOGIN_HTML } from './pages'
+import { APP_HTML, SERVICE_LEADS_HTML, LOGIN_HTML, INVITE_HTML } from './pages'
 
 type Bindings = {
   KV: KVNamespace
@@ -850,7 +850,10 @@ function getToken(c: any): string | null {
 const SKIP_AUTH = new Set([
   'POST /api/leads', 'GET /api/status',
   'POST /api/auth/login', 'POST /api/auth/logout',
-  'GET /api/auth/google', 'GET /api/auth/google/callback', 'GET /api/auth/google/status'
+  'GET /api/auth/google', 'GET /api/auth/google/callback', 'GET /api/auth/google/status',
+  // Tenant invitation acceptance — public, no session needed
+  'GET /api/subscription-plans'
+  // Dynamic invite routes checked by prefix in middleware below
 ])
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>()
@@ -873,8 +876,11 @@ app.use('*', async (c, next) => {
 })
 app.use('/api/*', cors({ origin: '*', allowMethods: ['POST', 'GET', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'] }))
 app.use('/api/*', async (c, next) => {
-  const key = `${c.req.method} ${new URL(c.req.url).pathname}`
+  const path = new URL(c.req.url).pathname
+  const key  = `${c.req.method} ${path}`
+  // Skip auth for public invite endpoints
   if (SKIP_AUTH.has(key)) return next()
+  if (path.startsWith('/api/invite/')) return next()
   if (!c.env?.DB) return next()
   const token = getToken(c)
   if (!token) return c.json({ error: 'Unauthorized' }, 401)
@@ -1355,8 +1361,18 @@ function validateLP(html: string, mode: 'ppc' | 'seo'): { passed: string[]; warn
 }
 
 app.post('/api/generate/landing-page', async (c) => {
+  const user = c.get('user')
   const { keyword, service, domain, company: co, mode = 'seo' } = await c.req.json()
   if (!keyword || !service || !domain) return c.json({ error: 'keyword, service, domain required' }, 400)
+
+  // Tenant isolation: company_admin can only generate for their own company's domains
+  if (user && user.role === 'company_admin' && user.company_id && c.env?.DB) {
+    const domRow = await c.env.DB.prepare('SELECT company_id FROM domains WHERE domain = ?').bind(domain).first() as any
+    if (domRow && domRow.company_id !== null && domRow.company_id !== user.company_id) {
+      return c.json({ error: 'Forbidden — domain does not belong to your company' }, 403)
+    }
+  }
+
   const detected = detectCompany(domain, keyword, co)
 
   // ── Fetch company data from D1 ─────────────────────────────────────────
@@ -1473,15 +1489,25 @@ app.post('/api/generate/landing-page', async (c) => {
 })
 
 app.post('/api/generate/ads-campaign', async (c) => {
+  const user = c.get('user')
   const { domain, service, keyword, company: co } = await c.req.json()
   if (!domain || !service || !keyword) return c.json({ error: 'domain, service, keyword required' }, 400)
+  if (user && user.role === 'company_admin' && user.company_id && c.env?.DB) {
+    const domRow = await c.env.DB.prepare('SELECT company_id FROM domains WHERE domain = ?').bind(domain).first() as any
+    if (domRow && domRow.company_id !== null && domRow.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+  }
   const detected = detectCompany(domain, keyword, co)
   return c.json({ ...generateAdsCampaign(domain, service, keyword, detected), generatedAt: new Date().toISOString() })
 })
 
 app.post('/api/generate/seo-content', async (c) => {
+  const user = c.get('user')
   const { domain, keyword, service, company: co } = await c.req.json()
   if (!domain || !keyword || !service) return c.json({ error: 'domain, keyword, service required' }, 400)
+  if (user && user.role === 'company_admin' && user.company_id && c.env?.DB) {
+    const domRow = await c.env.DB.prepare('SELECT company_id FROM domains WHERE domain = ?').bind(domain).first() as any
+    if (domRow && domRow.company_id !== null && domRow.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+  }
   const detected = detectCompany(domain, keyword, co)
   return c.json(generateSeoContent(domain, keyword, service, detected))
 })
@@ -1817,6 +1843,7 @@ app.get('/app', (c) => {
   return c.html(APP_HTML)
 })
 app.get('/serviceleads', (c) => c.html(SERVICE_LEADS_HTML))
+app.get('/invite/:token', (c) => c.html(INVITE_HTML))
 
 // ── PORKBUN API v3 ────────────────────────────────────────────────────────────
 // All domain registration and management goes through Porkbun exclusively.
@@ -2419,6 +2446,490 @@ app.patch('/api/reviews/:review_id/featured', async (c) => {
     return c.json({ success: true })
   } catch (err: any) {
     return c.json({ error: 'Update failed', detail: err?.message }, 500)
+  }
+})
+
+// ── TENANT SYSTEM ─────────────────────────────────────────────────────────────
+// White-label multi-tenant SaaS.  Three-tier role hierarchy:
+//   super_admin → company_admin (tenant, pays monthly) → staff (tenant employee)
+// Tenant isolation: all queries scoped by company_id.  super_admin bypasses filters.
+// Invitation tokens expire in 7 days and are single-use.
+
+async function hashPassword(password: string): Promise<string> {
+  const enc  = new TextEncoder()
+  const salt = crypto.getRandomValues(new Uint8Array(16))
+  const saltHex = Array.from(salt).map(b => b.toString(16).padStart(2, '0')).join('')
+  const key  = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: 100000, hash: { name: 'SHA-256' } },
+    key, 256
+  )
+  const hashHex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('')
+  return `pbkdf2:${saltHex}:${hashHex}`
+}
+
+function generateToken(len = 32): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(len))
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function sendInviteEmail(
+  toEmail: string,
+  subject: string,
+  htmlBody: string
+): Promise<{ sent: boolean; error?: string }> {
+  try {
+    const res = await fetch('https://api.mailchannels.net/tx/v1/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        personalizations: [{ to: [{ email: toEmail }] }],
+        from: { email: 'no-reply@slm-hub.ca', name: 'SLM Hub' },
+        subject,
+        content: [{ type: 'text/html', value: htmlBody }]
+      })
+    })
+    if (res.status === 202 || res.status === 200) return { sent: true }
+    const text = await res.text().catch(() => '')
+    return { sent: false, error: `MailChannels ${res.status}: ${text.slice(0, 200)}` }
+  } catch (e: any) {
+    return { sent: false, error: e?.message || 'Send failed' }
+  }
+}
+
+// GET /api/subscription-plans — list active plans (public — needed for invite page)
+app.get('/api/subscription-plans', async (c) => {
+  if (!c.env?.DB) return c.json({ plans: [] })
+  try {
+    const res = await c.env.DB.prepare('SELECT * FROM subscription_plans WHERE active = 1 ORDER BY price_monthly').all()
+    return c.json({ plans: res.results || [] })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/tenants — list all tenants with usage (super_admin only)
+app.get('/api/tenants', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ tenants: [] })
+  try {
+    const res = await c.env.DB.prepare(`
+      SELECT t.*,
+        (SELECT COUNT(*) FROM domains d WHERE d.company_id = t.id) AS domain_count,
+        (SELECT COUNT(*) FROM users u WHERE u.company_id = t.id AND u.active = 1) AS user_count
+      FROM tenants t ORDER BY t.created_at DESC
+    `).all()
+    return c.json({ tenants: res.results || [] })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/tenants/invite — create tenant + invitation + send email (super_admin only)
+app.post('/api/tenants/invite', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+
+  const body = await c.req.json()
+  const { company_name, billing_email, plan, monthly_fee, max_domains, max_users, notes } = body
+  if (!company_name || !billing_email) return c.json({ error: 'company_name and billing_email required' }, 400)
+  if (!/^[^@]+@[^@]+\.[^@]+$/.test(billing_email)) return c.json({ error: 'Invalid billing email' }, 400)
+
+  // Derive company_key from name
+  const company_key = company_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+
+  const now        = new Date().toISOString()
+  const expiresAt  = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  const token      = generateToken(32)
+
+  try {
+    // Create tenant
+    const tenantRes = await c.env.DB.prepare(
+      `INSERT INTO tenants (company_name, company_key, plan, status, invited_by, invited_at, billing_email, monthly_fee, max_domains, max_users, notes, created_at)
+       VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      company_name.trim(),
+      company_key,
+      plan || 'starter',
+      user.id,
+      now,
+      billing_email.toLowerCase().trim(),
+      monthly_fee || 0,
+      max_domains || 10,
+      max_users || 5,
+      notes || null,
+      now
+    ).run()
+
+    const tenantId = tenantRes.meta?.last_row_id
+    if (!tenantId) return c.json({ error: 'Failed to create tenant' }, 500)
+
+    // Create invitation
+    await c.env.DB.prepare(
+      `INSERT INTO tenant_invitations (tenant_id, email, role, token, status, invited_by, invited_at, expires_at)
+       VALUES (?, ?, 'company_admin', ?, 'pending', ?, ?, ?)`
+    ).bind(tenantId, billing_email.toLowerCase().trim(), token, user.id, now, expiresAt).run()
+
+    // Build invite URL
+    const inviteUrl = `https://slm-hub.ca/invite/${token}`
+
+    // Send email via MailChannels
+    const emailHtml = `
+      <!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;background:#0d1117;color:#e2e8f0;padding:40px;max-width:600px;margin:0 auto">
+        <div style="background:#CC0000;padding:16px 24px;border-radius:8px 8px 0 0">
+          <h1 style="margin:0;color:#fff;font-size:20px">🚨 You've been invited to SLM Hub</h1>
+        </div>
+        <div style="background:#1a2236;padding:28px;border-radius:0 0 8px 8px;border:1px solid #1e2d40">
+          <p style="font-size:16px;margin-top:0">Hi there,</p>
+          <p>You've been invited to join <strong style="color:#CC0000">SLM Hub</strong> — the Services Leads Marketing platform.</p>
+          <p><strong>Company:</strong> ${company_name}</p>
+          <p><strong>Plan:</strong> ${plan || 'Starter'}</p>
+          <p>Click the button below to activate your account. This link expires in 7 days.</p>
+          <div style="text-align:center;margin:32px 0">
+            <a href="${inviteUrl}" style="background:#CC0000;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">
+              Activate My Account →
+            </a>
+          </div>
+          <p style="font-size:13px;color:#64748b">Or copy this link:<br><code style="background:#0d1117;padding:4px 8px;border-radius:4px;font-size:12px">${inviteUrl}</code></p>
+          <hr style="border-color:#1e2d40;margin:24px 0">
+          <p style="font-size:12px;color:#64748b;margin:0">If you didn't expect this invitation, ignore this email.</p>
+        </div>
+      </body></html>`
+
+    const emailResult = await sendInviteEmail(
+      billing_email,
+      `You've been invited to SLM Hub — ${company_name}`,
+      emailHtml
+    )
+
+    return c.json({
+      success: true,
+      tenant_id: tenantId,
+      invite_url: inviteUrl,
+      email_sent: emailResult.sent,
+      email_error: emailResult.error || null,
+      message: emailResult.sent
+        ? `Invitation sent to ${billing_email}`
+        : `Tenant created. Email send failed (${emailResult.error}) — share invite link manually: ${inviteUrl}`
+    })
+  } catch (e: any) {
+    if (e?.message?.includes('UNIQUE')) return c.json({ error: `Company key "${company_key}" already exists` }, 409)
+    return c.json({ error: 'Failed to create invitation', detail: e?.message }, 500)
+  }
+})
+
+// GET /api/tenants/:id — tenant detail with usage stats + invited users (super_admin only)
+app.get('/api/tenants/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const id = Number(c.req.param('id'))
+  try {
+    const [tenant, invitations, members] = await Promise.all([
+      c.env.DB.prepare(`
+        SELECT t.*,
+          (SELECT COUNT(*) FROM domains d WHERE d.company_id = t.id) AS domain_count,
+          (SELECT COUNT(*) FROM users u WHERE u.company_id = t.id AND u.active = 1) AS user_count,
+          (SELECT COUNT(*) FROM google_business_profiles gbp WHERE gbp.company_id = t.id) AS gbp_count
+        FROM tenants t WHERE t.id = ?`).bind(id).first(),
+      c.env.DB.prepare('SELECT id, email, role, status, invited_at, accepted_at, expires_at FROM tenant_invitations WHERE tenant_id = ? ORDER BY invited_at DESC').bind(id).all(),
+      c.env.DB.prepare("SELECT id, name, email, role, active, last_login FROM users WHERE company_id = ? ORDER BY role, name").bind(id).all()
+    ])
+    if (!tenant) return c.json({ error: 'Tenant not found' }, 404)
+    return c.json({ tenant, invitations: invitations.results || [], members: members.results || [] })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// PATCH /api/tenants/:id — update tenant plan/status/fee (super_admin only)
+app.patch('/api/tenants/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const id   = Number(c.req.param('id'))
+  const body = await c.req.json()
+  const { plan, status, monthly_fee, max_domains, max_users, notes } = body
+  try {
+    await c.env.DB.prepare(
+      'UPDATE tenants SET plan=?, status=?, monthly_fee=?, max_domains=?, max_users=?, notes=? WHERE id=?'
+    ).bind(plan, status, monthly_fee, max_domains, max_users, notes || null, id).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: 'Update failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/invite/:token — validate token + return tenant/plan data (PUBLIC — no auth)
+app.get('/api/invite/:token', async (c) => {
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const token = c.req.param('token')
+  try {
+    const inv = await c.env.DB.prepare(
+      'SELECT i.*, t.company_name, t.plan, t.monthly_fee FROM tenant_invitations i JOIN tenants t ON i.tenant_id = t.id WHERE i.token = ?'
+    ).bind(token).first() as any
+    if (!inv) return c.json({ error: 'invalid', message: 'This invitation was not found.' }, 404)
+    if (inv.status !== 'pending') return c.json({ error: 'used', message: 'This invitation has already been accepted.' }, 410)
+    const now = new Date().toISOString()
+    if (inv.expires_at < now) {
+      await c.env.DB.prepare("UPDATE tenant_invitations SET status='expired' WHERE token=?").bind(token).run()
+      return c.json({ error: 'expired', message: 'This invitation link has expired. Contact your administrator for a new one.' }, 410)
+    }
+    return c.json({
+      valid: true,
+      email: inv.email,
+      role: inv.role,
+      company_name: inv.company_name,
+      plan: inv.plan,
+      monthly_fee: inv.monthly_fee,
+      tenant_id: inv.tenant_id
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Lookup failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/invite/:token/accept — create user + activate tenant + create session (PUBLIC)
+app.post('/api/invite/:token/accept', async (c) => {
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const token = c.req.param('token')
+  const body  = await c.req.json()
+  const { name, password } = body
+  if (!name || !password) return c.json({ error: 'name and password required' }, 400)
+  if (password.length < 8) return c.json({ error: 'Password must be at least 8 characters' }, 400)
+
+  try {
+    const inv = await c.env.DB.prepare(
+      'SELECT i.*, t.company_name, t.company_key, t.id AS tenant_id FROM tenant_invitations i JOIN tenants t ON i.tenant_id = t.id WHERE i.token = ? AND i.status = ?'
+    ).bind(token, 'pending').first() as any
+    if (!inv) return c.json({ error: 'expired_or_used', message: 'This invitation is no longer valid.' }, 410)
+
+    const now      = new Date().toISOString()
+    if (inv.expires_at < now) return c.json({ error: 'expired', message: 'This invitation has expired.' }, 410)
+
+    // Check if a user with this email already exists
+    const existing = await c.env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(inv.email).first()
+    if (existing) return c.json({ error: 'Email already registered. Please log in instead.' }, 409)
+
+    const passwordHash = await hashPassword(password)
+    const userId       = crypto.randomUUID()
+    const sessionId    = crypto.randomUUID()
+    const sessionToken = crypto.randomUUID()
+    const expiresAt    = new Date(Date.now() + 86400000).toISOString()
+
+    // Determine company_id based on role:
+    // company_admin → tenant.id (links to companies table — assumes company was created via Companies tab or will be)
+    // staff → same as the inviting company_admin's company_id (stored in invitation)
+    let companyId: number | null = inv.tenant_id
+
+    // For staff: get the company_id from the inviting user's session context
+    if (inv.role === 'staff') {
+      const invitingUser = await c.env.DB.prepare('SELECT company_id FROM users WHERE id = ?').bind(inv.invited_by).first() as any
+      companyId = invitingUser?.company_id || inv.tenant_id
+    }
+
+    // Create user
+    await c.env.DB.prepare(
+      'INSERT INTO users (id, name, email, password_hash, role, company_id, active, created_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
+    ).bind(userId, name.trim(), inv.email, passwordHash, inv.role, companyId, now).run()
+
+    // Activate tenant (only for company_admin role)
+    if (inv.role === 'company_admin') {
+      await c.env.DB.prepare(
+        "UPDATE tenants SET status='active', activated_at=? WHERE id=?"
+      ).bind(now, inv.tenant_id).run()
+    }
+
+    // Mark invitation accepted
+    await c.env.DB.prepare(
+      "UPDATE tenant_invitations SET status='accepted', accepted_at=? WHERE token=?"
+    ).bind(now, token).run()
+
+    // Create session
+    await c.env.DB.prepare(
+      'INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(sessionId, userId, sessionToken, expiresAt, now).run()
+
+    return new Response(JSON.stringify({
+      success: true,
+      user: { id: userId, email: inv.email, role: inv.role, name: name.trim(), company_id: companyId }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `slm_token=${sessionToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`
+      }
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Activation failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/team/invite — company_admin invites staff (or super_admin invites anyone)
+app.post('/api/team/invite', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+
+  const { email, role } = await c.req.json()
+  if (!email) return c.json({ error: 'email required' }, 400)
+  if (!/^[^@]+@[^@]+\.[^@]+$/.test(email)) return c.json({ error: 'Invalid email' }, 400)
+
+  // company_admin can only invite staff
+  const inviteRole = user.role === 'super_admin' ? (role || 'staff') : 'staff'
+
+  // Enforce user limit for company_admin
+  if (user.role === 'company_admin' && user.company_id) {
+    const tenant = await c.env.DB.prepare('SELECT max_users FROM tenants WHERE id = ?').bind(user.company_id).first() as any
+    if (tenant) {
+      const currentCount = await c.env.DB.prepare('SELECT COUNT(*) AS cnt FROM users WHERE company_id = ? AND active = 1').bind(user.company_id).first() as any
+      const cnt = currentCount?.cnt || 0
+      if (cnt >= tenant.max_users) {
+        return c.json({ error: `User limit reached (${tenant.max_users} max on your plan). Upgrade to add more team members.` }, 403)
+      }
+    }
+  }
+
+  const now       = new Date().toISOString()
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  const token     = generateToken(32)
+  const tenantId  = user.company_id
+
+  // Get company name for email
+  const companyRow = await c.env.DB.prepare('SELECT name FROM companies WHERE id = ?').bind(tenantId).first() as any
+  const companyName = companyRow?.name || 'SLM Hub'
+
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO tenant_invitations (tenant_id, email, role, token, status, invited_by, invited_at, expires_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)`
+    ).bind(tenantId, email.toLowerCase().trim(), inviteRole, token, user.id, now, expiresAt).run()
+
+    const inviteUrl = `https://slm-hub.ca/invite/${token}`
+    const emailHtml = `
+      <!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;background:#0d1117;color:#e2e8f0;padding:40px;max-width:600px;margin:0 auto">
+        <div style="background:#CC0000;padding:16px 24px;border-radius:8px 8px 0 0">
+          <h1 style="margin:0;color:#fff;font-size:20px">🚨 Join ${companyName} on SLM Hub</h1>
+        </div>
+        <div style="background:#1a2236;padding:28px;border-radius:0 0 8px 8px;border:1px solid #1e2d40">
+          <p style="font-size:16px;margin-top:0">You've been invited to join <strong style="color:#CC0000">${companyName}</strong> on SLM Hub as a <strong>${inviteRole}</strong>.</p>
+          <div style="text-align:center;margin:32px 0">
+            <a href="${inviteUrl}" style="background:#CC0000;color:#fff;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:700;font-size:16px;display:inline-block">
+              Accept Invitation →
+            </a>
+          </div>
+          <p style="font-size:13px;color:#64748b">Link: <code style="background:#0d1117;padding:4px 8px;border-radius:4px">${inviteUrl}</code></p>
+          <p style="font-size:12px;color:#64748b;margin-bottom:0">Expires in 7 days.</p>
+        </div>
+      </body></html>`
+
+    const emailResult = await sendInviteEmail(email, `You've been invited to join ${companyName} on SLM Hub`, emailHtml)
+
+    return c.json({
+      success: true,
+      invite_url: inviteUrl,
+      email_sent: emailResult.sent,
+      email_error: emailResult.error || null,
+      message: emailResult.sent ? `Invitation sent to ${email}` : `Invite created. Share this link: ${inviteUrl}`
+    })
+  } catch (e: any) {
+    return c.json({ error: 'Failed to create invitation', detail: e?.message }, 500)
+  }
+})
+
+// GET /api/team — list team members for current company (company_admin+)
+app.get('/api/team', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  if (!c.env?.DB) return c.json({ members: [], invitations: [] })
+  const companyId = user.role === 'super_admin' ? null : user.company_id
+  try {
+    const [members, invitations] = await Promise.all([
+      companyId !== null
+        ? c.env.DB.prepare("SELECT id, name, email, role, active, last_login, created_at FROM users WHERE company_id = ? ORDER BY role, name").bind(companyId).all()
+        : c.env.DB.prepare("SELECT id, name, email, role, active, last_login, created_at, company_id FROM users ORDER BY company_id, role, name").all(),
+      companyId !== null
+        ? c.env.DB.prepare("SELECT id, email, role, status, invited_at, accepted_at, expires_at FROM tenant_invitations WHERE tenant_id = ? ORDER BY invited_at DESC").bind(companyId).all()
+        : c.env.DB.prepare("SELECT id, email, role, status, invited_at, accepted_at, expires_at, tenant_id FROM tenant_invitations ORDER BY invited_at DESC LIMIT 50").all()
+    ])
+    return c.json({ members: members.results || [], invitations: invitations.results || [] })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/tenants/:id/impersonate — super_admin starts impersonation session
+app.post('/api/tenants/:id/impersonate', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB || !c.env?.KV) return c.json({ error: 'DB/KV unavailable' }, 500)
+  const tenantId = Number(c.req.param('id'))
+  try {
+    // Find the company_admin user for this tenant
+    const adminUser = await c.env.DB.prepare(
+      "SELECT id, email, role, company_id, name FROM users WHERE company_id = ? AND role = 'company_admin' AND active = 1 LIMIT 1"
+    ).bind(tenantId).first() as any
+    if (!adminUser) return c.json({ error: 'No active company_admin found for this tenant' }, 404)
+
+    const now        = new Date().toISOString()
+    const sessionId  = crypto.randomUUID()
+    const impToken   = crypto.randomUUID()
+    const expiresAt  = new Date(Date.now() + 3600000).toISOString() // 1 hour impersonation
+
+    await c.env.DB.prepare(
+      'INSERT INTO sessions (id, user_id, token, expires_at, created_at) VALUES (?, ?, ?, ?, ?)'
+    ).bind(sessionId, adminUser.id, impToken, expiresAt, now).run()
+
+    // Store the original super_admin token so they can exit impersonation
+    const originalToken = getToken(c)
+    if (originalToken) {
+      await c.env.KV.put(`impersonate_origin:${impToken}`, originalToken, { expirationTtl: 3600 })
+    }
+
+    // Get company info for the banner
+    const co = await c.env.DB.prepare('SELECT name FROM companies WHERE id = ?').bind(tenantId).first() as any
+
+    return new Response(JSON.stringify({
+      success: true,
+      impersonating: adminUser.name || adminUser.email,
+      company_name: co?.name || 'Unknown',
+      message: `Now viewing as ${adminUser.name || adminUser.email} — ${co?.name || 'Unknown'}`
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `slm_token=${impToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=3600`
+      }
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Impersonation failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/auth/exit-impersonate — restore super_admin session
+app.post('/api/auth/exit-impersonate', async (c) => {
+  if (!c.env?.KV || !c.env?.DB) return c.json({ error: 'KV/DB unavailable' }, 500)
+  const currentToken = getToken(c)
+  if (!currentToken) return c.json({ error: 'No session' }, 401)
+  try {
+    const originalToken = await c.env.KV.get(`impersonate_origin:${currentToken}`)
+    if (!originalToken) return c.json({ error: 'Not in impersonation mode' }, 400)
+
+    // Delete impersonation session + KV key
+    await c.env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(currentToken).run()
+    await c.env.KV.delete(`impersonate_origin:${currentToken}`)
+
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `slm_token=${originalToken}; HttpOnly; Path=/; SameSite=Lax; Max-Age=86400`
+      }
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Exit failed', detail: err?.message }, 500)
   }
 })
 

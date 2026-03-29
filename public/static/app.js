@@ -11,10 +11,10 @@ let lastSeoContent   = null;
 // ── AUTH ──────────────────────────────────────────────────────────────────
 
 const ROLE_COLORS = {
-  super_admin:   { bg: 'rgba(217,119,6,0.15)',   color: '#D97706', border: 'rgba(217,119,6,0.3)' },
-  company_admin: { bg: 'rgba(96,165,250,0.12)',  color: '#60a5fa', border: 'rgba(96,165,250,0.25)' },
+  super_admin:   { bg: 'rgba(217,119,6,0.20)',   color: '#F59E0B', border: 'rgba(217,119,6,0.4)' },  // gold
+  company_admin: { bg: 'rgba(96,165,250,0.12)',  color: '#60a5fa', border: 'rgba(96,165,250,0.25)' }, // blue
   manager:       { bg: 'rgba(74,222,128,0.12)',  color: '#4ade80', border: 'rgba(74,222,128,0.25)' },
-  staff:         { bg: 'rgba(148,163,184,0.12)', color: '#94a3b8', border: 'rgba(148,163,184,0.25)' }
+  staff:         { bg: 'rgba(148,163,184,0.12)', color: '#94a3b8', border: 'rgba(148,163,184,0.25)' } // grey
 };
 
 async function checkAuth() {
@@ -32,8 +32,48 @@ async function checkAuth() {
       badge.style.cssText = `background:${c.bg};color:${c.color};border-color:${c.border}`;
     }
     if (nameEl) nameEl.textContent = user.name || user.email;
+
+    // Role-based nav visibility
+    _applyRoleNav(user.role);
+
+    // Check for active impersonation (KV key exists if we're in imp mode)
+    // The impersonation banner is shown if the role is company_admin but we came via impersonate
+    // We detect this by checking a sessionStorage flag set during impersonation
+    if (sessionStorage.getItem('slm_impersonating')) {
+      const banner = document.getElementById('imp-banner');
+      const impName = document.getElementById('imp-name');
+      const impInfo = JSON.parse(sessionStorage.getItem('slm_impersonating') || '{}');
+      if (banner) { banner.style.display = 'block'; document.body.classList.add('impersonating'); }
+      if (impName) impName.textContent = `${impInfo.name || user.name} — ${impInfo.company || ''}`;
+    }
   } catch (e) {
     if (e) window.location.replace('/login');
+  }
+}
+
+function _applyRoleNav(role) {
+  const isSuperAdmin    = role === 'super_admin';
+  const isCompanyAdmin  = role === 'company_admin';
+  const isStaff         = role === 'staff';
+
+  // super_admin nav items (Tenants + Companies)
+  document.querySelectorAll('.super-nav').forEach(el => {
+    el.style.display = isSuperAdmin ? '' : 'none';
+  });
+
+  // Generator nav items (hidden for staff)
+  const generatorSections = ['domains','landing','ads','seo','keywords','publish','images','reviews'];
+  document.querySelectorAll('.nav-item').forEach(btn => {
+    const sec = btn.dataset.section;
+    if (!sec) return;
+    if (isStaff && generatorSections.includes(sec)) btn.style.display = 'none';
+  });
+
+  // Update sidebar footer role text
+  const footer = document.querySelector('.sb-footer');
+  if (footer) {
+    const roleLabel = isSuperAdmin ? 'God Mode' : isCompanyAdmin ? 'Company Admin' : 'Staff';
+    footer.textContent = `v2.0.0 — ${roleLabel}`;
   }
 }
 
@@ -76,7 +116,9 @@ const SECTION_LABELS = {
   images:    'Image Library',
   reviews:   'Google Reviews',
   leads:     'Inbound Leads',
-  companies: 'Company Management'
+  tenants:   'Tenant Management',
+  companies: 'Company Management',
+  settings:  'Settings'
 };
 
 function showSection(id) {
@@ -97,6 +139,8 @@ function showSection(id) {
   if (id === 'images')    { loadTemplates(); loadImageLibrary(); _populateImageDomainSelect(); }
   if (id === 'reviews')   { rvInit(); }
   if (id === 'companies') { loadCompanyMgmt(); }
+  if (id === 'tenants')   { loadTenants(); }
+  if (id === 'settings')  { loadTeam(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -1733,6 +1777,340 @@ async function rvLoadOverview() {
 
 function getStoredToken() {
   return document.cookie.split(';').map(c => c.trim()).find(c => c.startsWith('slm_token='))?.split('=')[1] || '';
+}
+
+// ── TENANT MANAGEMENT ─────────────────────────────────────────────────────
+
+let _tnPlans = [];      // subscription plans cache
+let _tnTenants = [];    // tenants cache
+
+async function loadTenants() {
+  const tbody = document.getElementById('tn-tbl-body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="8" style="color:var(--tx3);text-align:center;padding:24px">Loading…</td></tr>';
+
+  const r = await fetch('/api/tenants', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+  const d = await r.json();
+  if (!r.ok || d.error) { tbody.innerHTML = `<tr><td colspan="8" style="color:#f87171;text-align:center;padding:24px">${d.error || 'Load failed'}</td></tr>`; return; }
+
+  _tnTenants = d.tenants || [];
+
+  // Update stats
+  const active  = _tnTenants.filter(t => t.status === 'active').length;
+  const pending = _tnTenants.filter(t => t.status === 'pending').length;
+  const mrr     = _tnTenants.filter(t => t.status === 'active').reduce((s, t) => s + (t.monthly_fee || 0), 0);
+  const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  setEl('tn-active-count', active);
+  setEl('tn-pending-count', pending);
+  setEl('tn-mrr', '$' + mrr.toLocaleString());
+
+  if (!_tnTenants.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:var(--tx3);text-align:center;padding:24px">No tenants yet. Invite your first client!</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = _tnTenants.map(t => {
+    const joined = t.activated_at ? new Date(t.activated_at).toLocaleDateString() : (t.invited_at ? new Date(t.invited_at).toLocaleDateString() : '—');
+    const fee    = t.monthly_fee ? `$${Number(t.monthly_fee).toLocaleString()}` : '—';
+    return `<tr>
+      <td><strong style="color:var(--tx)">${t.company_name}</strong><div style="font-size:11px;color:var(--tx3);font-family:monospace">${t.company_key}</div></td>
+      <td><span class="tn-plan">${t.plan || 'starter'}</span></td>
+      <td><span class="tn-status ${t.status}">${t.status}</span></td>
+      <td>${t.domain_count || 0} / ${t.max_domains || '—'}</td>
+      <td>${t.user_count || 0} / ${t.max_users || '—'}</td>
+      <td>${fee}</td>
+      <td style="color:var(--tx3)">${joined}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sec btn-sm" onclick="showTenantDetail(${t.id})">Detail</button>
+        <button class="btn btn-amber btn-sm" onclick="impersonateTenant(${t.id})" title="View as this tenant">👁️</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function showTenantDetail(id) {
+  const card = document.getElementById('tn-detail-card');
+  const body = document.getElementById('tn-detail-body');
+  const title = document.getElementById('tn-detail-title');
+  card.style.display = 'block';
+  body.innerHTML = '<div style="color:var(--tx3);padding:20px">Loading…</div>';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  const r = await fetch(`/api/tenants/${id}`, { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+  const d = await r.json();
+  if (!r.ok) { body.innerHTML = `<div style="color:#f87171">${d.error || 'Load failed'}</div>`; return; }
+
+  const t = d.tenant;
+  title.textContent = `${t.company_name} — Detail`;
+
+  const planFeat = (() => { try { return JSON.parse(_tnPlans.find(p => p.name.toLowerCase() === t.plan)?.features || '[]'); } catch { return []; } })();
+
+  body.innerHTML = `
+    <div class="tn-stats-row">
+      <div class="tn-stat"><div class="tn-stat-num">${t.domain_count || 0}</div><div class="tn-stat-label">Domains Used</div></div>
+      <div class="tn-stat"><div class="tn-stat-num">${t.max_domains || '—'}</div><div class="tn-stat-label">Domain Limit</div></div>
+      <div class="tn-stat"><div class="tn-stat-num">${t.user_count || 0}</div><div class="tn-stat-label">Active Users</div></div>
+      <div class="tn-stat"><div class="tn-stat-num">${t.max_users || '—'}</div><div class="tn-stat-label">User Limit</div></div>
+      <div class="tn-stat"><div class="tn-stat-num">${t.gbp_count || 0}</div><div class="tn-stat-label">GBP Connected</div></div>
+      <div class="tn-stat"><div class="tn-stat-num" style="color:#4ade80">$${(t.monthly_fee || 0).toLocaleString()}</div><div class="tn-stat-label">MRR</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:8px">Company Info</div>
+        <div style="font-size:13px;color:var(--tx2);line-height:2">
+          <strong style="color:var(--tx)">Key:</strong> <code>${t.company_key}</code><br>
+          <strong style="color:var(--tx)">Plan:</strong> <span class="tn-plan">${t.plan}</span><br>
+          <strong style="color:var(--tx)">Status:</strong> <span class="tn-status ${t.status}">${t.status}</span><br>
+          <strong style="color:var(--tx)">Billing Email:</strong> ${t.billing_email || '—'}<br>
+          ${t.notes ? `<strong style="color:var(--tx)">Notes:</strong> ${t.notes}` : ''}
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:8px">Plan Features</div>
+        <div style="font-size:13px;color:var(--tx2)">
+          ${planFeat.length ? planFeat.map(f => `<div>• ${f}</div>`).join('') : '<div style="color:var(--tx3)">—</div>'}
+        </div>
+      </div>
+    </div>
+
+    <!-- Edit tenant -->
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:8px">Edit Plan / Status</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+      <select id="td-plan" style="font-size:13px">
+        ${['starter','growth','pro','agency'].map(p => `<option value="${p}" ${t.plan===p?'selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+      </select>
+      <select id="td-status" style="font-size:13px">
+        ${['pending','active','suspended','cancelled'].map(s => `<option value="${s}" ${t.status===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+      <input type="text" id="td-fee" value="${t.monthly_fee || 0}" placeholder="Monthly Fee" style="font-size:13px">
+      <button class="btn btn-amber btn-sm" onclick="saveTenantDetail(${t.id})">Save Changes</button>
+    </div>
+
+    ${d.members?.length ? `
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:8px;margin-top:16px">Team Members</div>
+    <div class="tbl-wrap" style="margin-bottom:12px">
+      <table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Last Login</th></tr></thead>
+      <tbody>${d.members.map(m => `<tr>
+        <td>${m.name || '—'}</td><td style="color:var(--tx3)">${m.email}</td>
+        <td><span class="team-role ${m.role}">${m.role}</span></td>
+        <td style="color:var(--tx3)">${m.last_login ? new Date(m.last_login).toLocaleDateString() : 'Never'}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>` : ''}
+
+    ${d.invitations?.length ? `
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:8px">Invitations</div>
+    <div class="tbl-wrap">
+      <table><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Sent</th><th>Expires</th></tr></thead>
+      <tbody>${d.invitations.map(i => `<tr>
+        <td>${i.email}</td>
+        <td><span class="team-role ${i.role}">${i.role}</span></td>
+        <td><span class="team-inv-status ${i.status}">${i.status}</span></td>
+        <td style="color:var(--tx3)">${new Date(i.invited_at).toLocaleDateString()}</td>
+        <td style="color:var(--tx3)">${new Date(i.expires_at).toLocaleDateString()}</td>
+      </tr>`).join('')}</tbody></table>
+    </div>` : ''}
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-amber btn-sm" onclick="impersonateTenant(${t.id})">👁️ View as ${t.company_name}</button>
+    </div>`;
+}
+
+function hideTenantDetail() {
+  document.getElementById('tn-detail-card').style.display = 'none';
+}
+
+async function saveTenantDetail(id) {
+  const plan   = document.getElementById('td-plan')?.value;
+  const status = document.getElementById('td-status')?.value;
+  const fee    = Number(document.getElementById('td-fee')?.value || 0);
+  const t      = _tnTenants.find(t => t.id === id);
+  if (!t) return;
+  const r = await fetch(`/api/tenants/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ plan, status, monthly_fee: fee, max_domains: t.max_domains, max_users: t.max_users, notes: t.notes })
+  });
+  const d = await r.json();
+  if (d.success) { toast('Tenant updated ✓', 'success'); loadTenants(); }
+  else toast(d.error || 'Update failed', 'error');
+}
+
+async function showInviteModal() {
+  // Load plans if not yet loaded
+  if (!_tnPlans.length) {
+    const r = await fetch('/api/subscription-plans');
+    const d = await r.json();
+    _tnPlans = d.plans || [];
+    const sel = document.getElementById('tn-f-plan');
+    if (sel) sel.innerHTML = '<option value="">— Select Plan —</option>' + _tnPlans.map(p => `<option value="${p.name.toLowerCase()}" data-fee="${p.price_monthly}" data-maxd="${p.max_domains}" data-maxu="${p.max_users}">${p.name} — $${p.price_monthly}/mo</option>`).join('');
+  }
+  document.getElementById('tn-f-name').value = '';
+  document.getElementById('tn-f-email').value = '';
+  document.getElementById('tn-f-fee').value = '';
+  document.getElementById('tn-f-maxd').value = '';
+  document.getElementById('tn-f-maxu').value = '';
+  document.getElementById('tn-f-notes').value = '';
+  document.getElementById('tn-invite-result').style.display = 'none';
+  document.getElementById('tn-invite-error').style.display = 'none';
+  document.getElementById('tn-invite-card').style.display = 'block';
+  document.getElementById('tn-invite-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function hideInviteModal() {
+  document.getElementById('tn-invite-card').style.display = 'none';
+}
+
+function tnPlanChanged() {
+  const sel = document.getElementById('tn-f-plan');
+  const opt = sel?.selectedOptions[0];
+  if (!opt || !opt.dataset.fee) return;
+  document.getElementById('tn-f-fee').value  = opt.dataset.fee;
+  document.getElementById('tn-f-maxd').value = opt.dataset.maxd;
+  document.getElementById('tn-f-maxu').value = opt.dataset.maxu;
+}
+
+async function sendTenantInvite() {
+  const name  = document.getElementById('tn-f-name').value.trim();
+  const email = document.getElementById('tn-f-email').value.trim();
+  const plan  = document.getElementById('tn-f-plan').value;
+  const fee   = document.getElementById('tn-f-fee').value;
+  const maxd  = document.getElementById('tn-f-maxd').value;
+  const maxu  = document.getElementById('tn-f-maxu').value;
+  const notes = document.getElementById('tn-f-notes').value.trim();
+  const errEl  = document.getElementById('tn-invite-error');
+  const resEl  = document.getElementById('tn-invite-result');
+
+  errEl.style.display = 'none';
+  resEl.style.display = 'none';
+
+  if (!name || !email) { errEl.textContent = 'Company name and billing email are required.'; errEl.style.display = 'block'; return; }
+
+  const r = await fetch('/api/tenants/invite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ company_name: name, billing_email: email, plan: plan || 'starter', monthly_fee: fee ? Number(fee) : null, max_domains: maxd ? Number(maxd) : null, max_users: maxu ? Number(maxu) : null, notes: notes || null })
+  });
+  const d = await r.json();
+
+  if (!r.ok || !d.success) { errEl.textContent = d.error || 'Invite failed'; errEl.style.display = 'block'; return; }
+
+  resEl.innerHTML = `✅ ${d.message}${!d.email_sent ? `<div class="invite-url-box">${d.invite_url}</div>` : ''}`;
+  resEl.style.display = 'block';
+  loadTenants();
+}
+
+async function impersonateTenant(tenantId) {
+  const r = await fetch(`/api/tenants/${tenantId}/impersonate`, {
+    method: 'POST', headers: { 'Authorization': `Bearer ${getStoredToken()}` }
+  });
+  const d = await r.json();
+  if (!r.ok || !d.success) { toast(d.error || 'Impersonation failed', 'error'); return; }
+
+  toast(`Now viewing as ${d.impersonating}`, 'success');
+  // Store impersonation info for banner display after reload
+  sessionStorage.setItem('slm_impersonating', JSON.stringify({ name: d.impersonating, company: d.company_name }));
+  // Reload app as impersonated user
+  setTimeout(() => { location.reload(); }, 800);
+}
+
+async function exitImpersonation() {
+  const r = await fetch('/api/auth/exit-impersonate', {
+    method: 'POST', headers: { 'Authorization': `Bearer ${getStoredToken()}` }
+  });
+  const d = await r.json();
+  if (d.success) {
+    sessionStorage.removeItem('slm_impersonating');
+    toast('Exited impersonation', 'success');
+    setTimeout(() => { location.reload(); }, 600);
+  } else {
+    toast(d.error || 'Exit failed', 'error');
+  }
+}
+
+// ── SETTINGS / TEAM ───────────────────────────────────────────────────────
+
+async function loadTeam() {
+  const tbody = document.getElementById('team-members-body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--tx3);text-align:center;padding:24px">Loading…</td></tr>';
+
+  const r = await fetch('/api/team', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+  const d = await r.json();
+  if (!r.ok) { tbody.innerHTML = `<tr><td colspan="5" style="color:#f87171;padding:20px">${d.error || 'Load failed'}</td></tr>`; return; }
+
+  const members = d.members || [];
+  if (!members.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--tx3);text-align:center;padding:24px">No team members yet.</td></tr>';
+  } else {
+    tbody.innerHTML = members.map(m => `<tr>
+      <td><strong>${m.name || '—'}</strong></td>
+      <td style="color:var(--tx3)">${m.email}</td>
+      <td><span class="team-role ${m.role}">${m.role}</span></td>
+      <td><span style="color:${m.active ? '#4ade80' : '#f87171'}">${m.active ? 'Active' : 'Inactive'}</span></td>
+      <td style="color:var(--tx3)">${m.last_login ? new Date(m.last_login).toLocaleDateString() : 'Never'}</td>
+    </tr>`).join('');
+  }
+
+  // Show pending invitations
+  const invitations = d.invitations || [];
+  const invSection  = document.getElementById('team-invitations-section');
+  const invBody     = document.getElementById('team-invitations-body');
+  if (invitations.filter(i => i.status === 'pending').length > 0 && invSection && invBody) {
+    invSection.style.display = 'block';
+    invBody.innerHTML = invitations.filter(i => i.status === 'pending').map(i => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--bd);font-size:13px">
+        <div style="flex:1">${i.email}</div>
+        <span class="team-role ${i.role}">${i.role}</span>
+        <span class="team-inv-status pending">pending</span>
+        <span style="color:var(--tx3);font-size:12px">Expires ${new Date(i.expires_at).toLocaleDateString()}</span>
+      </div>`).join('');
+  }
+
+  // Show account info
+  const accountEl = document.getElementById('settings-account-info');
+  if (accountEl && currentUser) {
+    accountEl.innerHTML = `
+      <strong>Name:</strong> ${currentUser.name || '—'}<br>
+      <strong>Email:</strong> ${currentUser.email}<br>
+      <strong>Role:</strong> <span class="team-role ${currentUser.role}">${currentUser.role}</span>
+    `;
+  }
+}
+
+function showStaffInviteForm() {
+  document.getElementById('staff-invite-card').style.display = 'block';
+  document.getElementById('staff-f-email').value = '';
+  document.getElementById('staff-invite-result').style.display = 'none';
+  document.getElementById('staff-invite-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function hideStaffInviteForm() {
+  document.getElementById('staff-invite-card').style.display = 'none';
+}
+
+async function sendStaffInvite() {
+  const email = document.getElementById('staff-f-email').value.trim();
+  const role  = document.getElementById('staff-f-role').value;
+  const resEl = document.getElementById('staff-invite-result');
+
+  if (!email) { toast('Email is required', 'error'); return; }
+
+  const r = await fetch('/api/team/invite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ email, role })
+  });
+  const d = await r.json();
+
+  if (!r.ok || !d.success) {
+    resEl.className = 'error-box';
+    resEl.textContent = d.error || 'Invite failed';
+  } else {
+    resEl.className = 'success-box';
+    resEl.innerHTML = `✅ ${d.message}${!d.email_sent ? `<div class="invite-url-box">${d.invite_url}</div>` : ''}`;
+    loadTeam();
+  }
+  resEl.style.display = 'block';
 }
 
 // ── TOAST ─────────────────────────────────────────────────────────────────

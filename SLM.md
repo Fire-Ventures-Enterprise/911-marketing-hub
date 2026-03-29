@@ -29,7 +29,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`
 
 ### R2 Bucket
 - **Name:** `slm-hub-images`
@@ -81,6 +81,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0007_keywords.sql` | Creates `keywords` table + 6 indexes; stores keyword research results linked to domains and companies |
 | `migrations/0008_domain_registrations.sql` | Adds Porkbun sync columns (whois_privacy, security_lock, labels, domain_id, imported_at, updated_at) + 5 indexes to pre-existing `domain_registrations` table |
 | `migrations/0009_template_column.sql` | Adds `template INTEGER DEFAULT NULL` to `domains` table + `idx_domains_template` index — already applied to production on 2026-03-28 |
+| `migrations/0010_tenant_system.sql` | Documents `tenants`, `tenant_invitations`, `subscription_plans` tables — already applied directly on production (2026-03-29); safe to run on fresh DB with CREATE TABLE IF NOT EXISTS |
 
 ---
 
@@ -259,6 +260,41 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **Inline GBP connect in edit form**: reuses same `POST /api/reviews/search-business` + `POST /api/reviews/connect/:id` endpoints as Reviews pane — no new API needed; tracks selected company via `_coInlineGbpCompanyId`; hides the section entirely in Add-Company form (no ID yet)
 - **`saveCompany()` refreshes global companies**: after create/update calls `await loadCompanies()` then `loadCompanyMgmt()` — keeps `allCompanies` in sync so LP generator dropdown, domain grouping, and Reviews selector are immediately up to date
 - **Color pickers sync both ways**: `<input type="color">` and `<input type="text">` are kept in sync via `oninput` cross-assignment — color picker updates text field and vice versa; both send the hex value to the API
+- **Tenant system built (2026-03-29)**: `tenants`, `tenant_invitations`, `subscription_plans` tables confirmed in D1; full invite/accept/impersonate API built; `/invite/:token` public page served via Hono route + `INVITE_HTML` export
+- **`build-inline.js` must include all new HTML pages** — when adding a new page (`invite.html`), add to `build-inline.js` AND export from `pages.ts` AND import in `index.tsx`; failing any of the three causes either a build error or blank page
+- **`INVITE_HTML` added to `pages.ts`**: `build-inline.js` was updated to inline `public/static/invite.html`; exported as `INVITE_HTML`; imported in `index.tsx`; served at `GET /invite/:token`
+- **Public tenant invitation routes skip auth**: `GET /api/invite/:token` and `POST /api/invite/:token/accept` skip auth middleware via prefix check `path.startsWith('/api/invite/')` in the auth middleware; `GET /api/subscription-plans` added to `SKIP_AUTH` set
+- **`hashPassword` function**: uses PBKDF2 (same algorithm as `verifyPassword`) — format `pbkdf2:{saltHex}:{hashHex}`; generates 16-byte random salt via `crypto.getRandomValues`; 100,000 iterations SHA-256
+- **Impersonation flow**: super_admin hits `POST /api/tenants/:id/impersonate` → creates a 1-hour session token for the target company_admin → stores original super_admin token in KV (`impersonate_origin:{newToken}`, TTL 1h) → new session cookie set → frontend stores `slm_impersonating` in sessionStorage → page reload → banner shown → exit hits `POST /api/auth/exit-impersonate` → swaps cookie back to original token → clears KV + sessionStorage
+- **`sendInviteEmail` uses MailChannels** (`https://api.mailchannels.net/tx/v1/send`) — no API key needed on Cloudflare Pages Workers; falls back gracefully if it fails (returns `email_sent: false` + `invite_url` in response so admin can share manually)
+- **Tenant isolation enforcement**: `POST /api/generate/landing-page`, `POST /api/generate/ads-campaign`, `POST /api/generate/seo-content` now check that the domain's `company_id` matches `user.company_id` when role is `company_admin`; `GET /api/domains`, `GET /api/companies`, `GET /api/leads`, `GET /api/reviews` already had isolation in place
+- **Role-based nav**: `_applyRoleNav(role)` called after auth — `super_admin` shows all nav including Tenants+Companies; `staff` hides generator items (domains/landing/ads/seo/keywords/publish/images/reviews); sidebar footer text reflects role
+- **Super Admin badge color = gold** (`#F59E0B`); company_admin = blue (`#60a5fa`); staff = grey (`#94a3b8`) — role colors defined in `ROLE_COLORS` in app.js
+- **User limit enforcement**: `POST /api/team/invite` checks `tenants.max_users` against active user count for the company; returns 403 with upgrade prompt if at limit; limit is read from D1 `tenants` table — never hardcoded
+- **Subscription plans from D1**: `GET /api/subscription-plans` serves 4 plans from D1 — never hardcode plan names or prices; plan limits (max_domains, max_users, features) always read from `subscription_plans` table
+- **Tenant invitation token**: 32-byte hex string (64 chars) via `generateToken(32)`; single-use (status `pending` → `accepted`); expires in 7 days; checked in both validate and accept endpoints
+
+---
+
+## TENANT SYSTEM DOCTRINE
+
+SLM Hub is a white-label multi-tenant SaaS platform. Three-tier role hierarchy:
+
+1. **`super_admin` (Nasser)** — God mode, sees all tenants, all data, all companies. No `company_id`. Bypasses all tenant isolation filters. Can impersonate any tenant for support.
+2. **`company_admin`** — Tenant, pays monthly subscription. Sees only their own company data (`WHERE company_id = user.company_id`). Can invite staff. Manages their own domains and campaigns.
+3. **`staff`** — Tenant employee. Read-only access to leads and reporting. Cannot manage domains, campaigns, or invite users. Same `company_id` as their admin.
+
+**Tenant onboarding flow:**
+1. super_admin invites → `POST /api/tenants/invite` → tenant record created (status: `pending`) → 7-day token stored in `tenant_invitations` → email sent via MailChannels
+2. Tenant opens `https://slm-hub.ca/invite/{token}` → frontend validates token at `GET /api/invite/{token}` → signup form shown
+3. Tenant submits name + password → `POST /api/invite/{token}/accept` → user created + tenant activated + session cookie set → redirect to `/app`
+4. company_admin can invite staff via Settings tab → `POST /api/team/invite` → same accept flow with `role=staff`
+
+**Tenant isolation rule:** ALL data queries must be scoped by `company_id` for non-super_admin users. Every route that reads companies, domains, leads, reviews, or campaigns must apply the filter. super_admin sees everything without filters.
+
+**Plan limits:** Never hardcode. Read `max_domains` and `max_users` from `tenants` table. Read plan features from `subscription_plans` table.
+
+**Invitation tokens:** 32-byte hex (64 chars), single-use, 7-day expiry. Invalidated on acceptance.
 
 ---
 

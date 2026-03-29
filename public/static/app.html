@@ -621,6 +621,50 @@
       .co-grid { grid-template-columns: 1fr; }
     }
 
+    /* ── IMPERSONATION BANNER ── */
+    #imp-banner {
+      display: none;
+      position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+      background: #d97706; color: #000;
+      padding: 8px 20px;
+      font-size: 13px; font-weight: 700;
+      text-align: center;
+    }
+    #imp-banner a { color: #000; text-decoration: underline; cursor: pointer; margin-left: 12px; }
+    body.impersonating { padding-top: 36px; }
+    body.impersonating .sidebar { top: 36px; }
+    body.impersonating .topbar { top: 36px; }
+
+    /* ── STATUS BOXES ── */
+    .success-box { background:rgba(74,222,128,.08); border:1px solid rgba(74,222,128,.3); border-radius:8px; padding:12px 16px; color:#4ade80; font-size:13px; }
+    .error-box   { background:rgba(248,113,113,.08); border:1px solid rgba(248,113,113,.3); border-radius:8px; padding:12px 16px; color:#f87171; font-size:13px; }
+    .card-actions { display:flex; align-items:center; gap:6px; }
+
+    /* ── TENANT MANAGEMENT ── */
+    .tn-status { display:inline-flex; align-items:center; gap:4px; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:700; }
+    .tn-status.active    { background:rgba(74,222,128,.12); color:#4ade80; border:1px solid rgba(74,222,128,.3); }
+    .tn-status.pending   { background:rgba(245,158,11,.12); color:#F59E0B; border:1px solid rgba(245,158,11,.3); }
+    .tn-status.suspended { background:rgba(248,113,113,.12); color:#f87171; border:1px solid rgba(248,113,113,.3); }
+    .tn-status.cancelled { background:rgba(100,116,139,.12); color:#64748b; border:1px solid rgba(100,116,139,.3); }
+    .tn-plan { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; background:rgba(96,165,250,.1); color:#60a5fa; border:1px solid rgba(96,165,250,.25); }
+    .tn-detail { background:var(--bg-s); border:1px solid var(--bd); border-radius:10px; padding:20px; margin-top:16px; }
+    .tn-detail-hd { font-size:14px; font-weight:800; color:var(--tx); margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; }
+    .tn-stat { text-align:center; padding:12px; border:1px solid var(--bd); border-radius:8px; background:var(--bg-c); flex:1; }
+    .tn-stat-num { font-size:22px; font-weight:900; color:var(--tx); }
+    .tn-stat-label { font-size:10px; font-weight:700; text-transform:uppercase; color:var(--tx3); margin-top:2px; letter-spacing:.04em; }
+    .tn-stats-row { display:flex; gap:8px; margin-bottom:14px; }
+    .invite-url-box { background:var(--bg-in); border:1px solid var(--bd); border-radius:6px; padding:8px 12px; font-family:'Courier New',monospace; font-size:11px; color:#4ade80; word-break:break-all; margin-top:10px; }
+
+    /* ── SETTINGS / TEAM ── */
+    .team-role { display:inline-block; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+    .team-role.super_admin   { background:rgba(217,119,6,.15); color:#D97706; border:1px solid rgba(217,119,6,.3); }
+    .team-role.company_admin { background:rgba(96,165,250,.12); color:#60a5fa; border:1px solid rgba(96,165,250,.25); }
+    .team-role.staff         { background:rgba(148,163,184,.12); color:#94a3b8; border:1px solid rgba(148,163,184,.25); }
+    .team-inv-status { display:inline-block; padding:2px 7px; border-radius:10px; font-size:10px; font-weight:700; }
+    .team-inv-status.pending  { color:#F59E0B; background:rgba(245,158,11,.1); }
+    .team-inv-status.accepted { color:#4ade80; background:rgba(74,222,128,.1); }
+    .team-inv-status.expired  { color:#64748b; background:rgba(100,116,139,.1); }
+
     /* ── COMPANY MANAGEMENT ── */
     .co-mgmt-status { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:700; }
     .co-mgmt-status.connected { background:rgba(74,222,128,.12); color:#4ade80; border:1px solid rgba(74,222,128,.3); }
@@ -642,6 +686,12 @@
   </style>
 </head>
 <body>
+<!-- Impersonation banner — visible only when super_admin is viewing as another user -->
+<div id="imp-banner">
+  👁️ Viewing as <strong id="imp-name">—</strong>
+  <a onclick="exitImpersonation()">Exit Impersonation ✕</a>
+</div>
+
 <div class="layout">
 
   <!-- ── SIDEBAR ── -->
@@ -692,9 +742,17 @@
         <span class="nav-icon">📋</span><span>Leads</span>
       </button>
 
-      <div class="sb-group co-mgmt-nav" style="display:none">Admin</div>
-      <button class="nav-item co-mgmt-nav" data-section="companies" onclick="showSection('companies')" style="display:none">
+      <div class="sb-group super-nav" style="display:none">Admin</div>
+      <button class="nav-item super-nav co-mgmt-nav" data-section="tenants" onclick="showSection('tenants')" style="display:none">
+        <span class="nav-icon">🏛️</span><span>Tenants</span>
+      </button>
+      <button class="nav-item super-nav co-mgmt-nav" data-section="companies" onclick="showSection('companies')" style="display:none">
         <span class="nav-icon">🏢</span><span>Companies</span>
+      </button>
+
+      <div class="sb-group settings-nav">Account</div>
+      <button class="nav-item settings-nav" data-section="settings" onclick="showSection('settings')">
+        <span class="nav-icon">⚙️</span><span>Settings</span>
       </button>
     </nav>
 
@@ -1235,6 +1293,110 @@
         </div>
       </div>
 
+      <!-- TENANTS (super_admin only) -->
+      <div class="pane" id="pane-tenants">
+        <div class="ph"><h2>🏛️ Tenant Management</h2><p>Invite and manage white-label tenants. View usage, revenue and subscription plans.</p></div>
+
+        <!-- Stats row -->
+        <div class="stats-grid" id="tn-stats">
+          <div class="stat-card" style="--sa:#4ade80"><div class="stat-num" id="tn-active-count">—</div><div class="stat-label">Active Tenants</div></div>
+          <div class="stat-card" style="--sa:#F59E0B"><div class="stat-num" id="tn-pending-count">—</div><div class="stat-label">Pending Invites</div></div>
+          <div class="stat-card" style="--sa:#60a5fa"><div class="stat-num" id="tn-mrr">—</div><div class="stat-label">MRR</div></div>
+        </div>
+
+        <!-- Tenant list card -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">All Tenants</div>
+            <div class="card-actions" style="display:flex;gap:8px">
+              <button class="btn btn-sec btn-sm" onclick="loadTenants()">↻ Refresh</button>
+              <button class="btn btn-primary btn-sm" onclick="showInviteModal()">+ Invite Tenant</button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Plan</th>
+                  <th>Status</th>
+                  <th>Domains</th>
+                  <th>Users</th>
+                  <th>Monthly Fee</th>
+                  <th>Joined</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tn-tbl-body">
+                <tr><td colspan="8" style="color:var(--tx3);text-align:center;padding:24px">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Tenant detail panel (shown on row click) -->
+        <div class="card" id="tn-detail-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title" id="tn-detail-title">Tenant Detail</div>
+            <div class="card-actions" style="display:flex;gap:8px">
+              <button class="btn btn-sec btn-sm" onclick="hideTenantDetail()">✕ Close</button>
+            </div>
+          </div>
+          <div id="tn-detail-body">Loading…</div>
+        </div>
+
+        <!-- Invite Modal (inline, shown/hidden) -->
+        <div class="card" id="tn-invite-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title">Invite New Tenant</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="hideInviteModal()">✕ Cancel</button>
+            </div>
+          </div>
+
+          <div id="tn-invite-result" class="success-box" style="display:none;margin-bottom:16px"></div>
+          <div id="tn-invite-error" class="error-box" style="display:none;margin-bottom:16px"></div>
+
+          <div class="co-form-grid">
+            <div class="ff">
+              <label>Company Name *</label>
+              <input type="text" id="tn-f-name" placeholder="e.g. Ottawa Renovation Co.">
+            </div>
+            <div class="ff">
+              <label>Billing Email *</label>
+              <input type="email" id="tn-f-email" placeholder="owner@company.ca">
+            </div>
+            <div class="ff">
+              <label>Subscription Plan</label>
+              <select id="tn-f-plan" onchange="tnPlanChanged()">
+                <option value="">— Loading plans —</option>
+              </select>
+            </div>
+            <div class="ff">
+              <label>Monthly Fee ($) <span style="font-size:10px;color:var(--tx3)">pre-filled from plan</span></label>
+              <input type="text" id="tn-f-fee" placeholder="e.g. 597">
+            </div>
+            <div class="ff">
+              <label>Max Domains</label>
+              <input type="text" id="tn-f-maxd" placeholder="e.g. 15">
+            </div>
+            <div class="ff">
+              <label>Max Users</label>
+              <input type="text" id="tn-f-maxu" placeholder="e.g. 8">
+            </div>
+            <div class="ff ff-full">
+              <label>Internal Notes <span style="font-size:10px;color:var(--tx3)">(never shown to tenant)</span></label>
+              <input type="text" id="tn-f-notes" placeholder="e.g. Referred by Mike — 3-month trial">
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="sendTenantInvite()">📧 Send Invitation</button>
+            <button class="btn btn-sec" onclick="hideInviteModal()">Cancel</button>
+          </div>
+        </div>
+      </div>
+
       <!-- COMPANIES (super_admin only) -->
       <div class="pane" id="pane-companies">
         <div class="ph"><h2>🏢 Company Management</h2><p>Add, edit and configure companies. Connect Google Business Profiles per company.</p></div>
@@ -1347,6 +1509,75 @@
         </div>
       </div>
 
+      <!-- SETTINGS -->
+      <div class="pane" id="pane-settings">
+        <div class="ph"><h2>⚙️ Settings</h2><p>Account settings, team members, and subscription details.</p></div>
+
+        <!-- Team Members (company_admin + super_admin) -->
+        <div class="card" id="settings-team-card">
+          <div class="card-hd">
+            <div class="card-title">Team Members</div>
+            <div class="card-actions" style="display:flex;gap:8px">
+              <button class="btn btn-sec btn-sm" onclick="loadTeam()">↻ Refresh</button>
+              <button class="btn btn-primary btn-sm" id="invite-staff-btn" onclick="showStaffInviteForm()">+ Invite Member</button>
+            </div>
+          </div>
+
+          <!-- Usage bar (company_admin only) -->
+          <div id="team-usage-bar" style="display:none;margin-bottom:14px;font-size:13px;color:var(--tx3)"></div>
+
+          <div class="tbl-wrap" style="margin-bottom:16px">
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Last Login</th></tr>
+              </thead>
+              <tbody id="team-members-body">
+                <tr><td colspan="5" style="color:var(--tx3);text-align:center;padding:24px">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Pending invitations -->
+          <div id="team-invitations-section" style="display:none">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3);margin-bottom:10px">Pending Invitations</div>
+            <div id="team-invitations-body"></div>
+          </div>
+        </div>
+
+        <!-- Invite Staff Form -->
+        <div class="card" id="staff-invite-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title">Invite Team Member</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="hideStaffInviteForm()">✕ Cancel</button>
+            </div>
+          </div>
+          <div id="staff-invite-result" style="display:none;margin-bottom:14px"></div>
+          <div class="co-form-grid">
+            <div class="ff">
+              <label>Email Address *</label>
+              <input type="email" id="staff-f-email" placeholder="team@company.ca">
+            </div>
+            <div class="ff">
+              <label>Role</label>
+              <select id="staff-f-role">
+                <option value="staff">Staff (read-only)</option>
+              </select>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="sendStaffInvite()">📧 Send Invite</button>
+            <button class="btn btn-sec" onclick="hideStaffInviteForm()">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Account info card -->
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Your Account</div></div>
+          <div id="settings-account-info" style="font-size:14px;color:var(--tx2);line-height:2">Loading…</div>
+        </div>
+      </div>
+
     </div><!-- /content -->
   </div><!-- /main-wrap -->
 </div><!-- /layout -->
@@ -1360,10 +1591,7 @@
     loadDomains();
     loadCompanies();
     checkGoogleAuth();
-    // Show Companies nav for super_admin only
-    if (currentUser && currentUser.role === 'super_admin') {
-      document.querySelectorAll('.co-mgmt-nav').forEach(el => el.style.display = '');
-    }
+    // Role-based visibility is now handled inside checkAuth() → _applyRoleNav()
   });
 </script>
 </body>
