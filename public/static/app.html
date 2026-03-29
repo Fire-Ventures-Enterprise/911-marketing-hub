@@ -683,6 +683,62 @@
     .co-tbl-key { font-family:'Courier New',monospace; font-size:11px; color:var(--tx3); margin-top:2px; }
     .co-edit-row { background:rgba(96,165,250,.04); }
     .co-edit-form { padding:18px; border-top:1px solid var(--bd); }
+
+    /* ── PERMISSION BANNER ── */
+    #perm-banner {
+      display: none;
+      position: fixed; top: 0; left: 0; right: 0; z-index: 9998;
+      background: #d97706; color: #000;
+      padding: 8px 20px; font-size: 13px; font-weight: 600;
+      text-align: center;
+    }
+    #perm-banner a { color: #000; text-decoration: underline; cursor: pointer; font-weight: 700; margin-left: 8px; }
+    body.perm-pending { padding-top: 36px; }
+    body.perm-pending .sidebar { top: 36px; }
+    body.perm-pending .topbar  { top: 36px; }
+    body.impersonating.perm-pending { padding-top: 72px; }
+    body.impersonating.perm-pending .sidebar { top: 72px; }
+    body.impersonating.perm-pending .topbar  { top: 72px; }
+
+    /* ── PERMISSION GATE OVERLAY ── */
+    #permission-gate {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(5,10,20,0.93);
+      z-index: 10000; overflow-y: auto; padding: 40px 20px;
+    }
+    .perm-card {
+      max-width: 560px; margin: 0 auto;
+      background: var(--bg-c); border: 1px solid var(--bd);
+      border-radius: 16px; padding: 40px;
+    }
+    .perm-logo  { font-size: 42px; margin-bottom: 16px; text-align: center; }
+    .perm-title { font-size: 22px; font-weight: 900; color: var(--tx); text-align: center; margin-bottom: 8px; }
+    .perm-sub   { font-size: 14px; color: var(--tx2); text-align: center; margin-bottom: 24px; }
+    .perm-body  { background: var(--bg-s); border: 1px solid var(--bd); border-radius: 10px; padding: 20px; margin-bottom: 20px; font-size: 13px; color: var(--tx2); line-height: 1.7; }
+    .perm-body p  { margin-bottom: 10px; }
+    .perm-body ul { margin: 0 0 10px 20px; }
+    .perm-body li { margin-bottom: 4px; }
+    .perm-version { font-size: 11px; color: var(--tx3); text-align: center; margin-bottom: 20px; }
+    .perm-actions { display: flex; flex-direction: column; gap: 10px; }
+    .perm-agree-btn { width: 100%; padding: 14px; font-size: 15px; font-weight: 700; }
+
+    /* ── BRAND PROFILE ── */
+    .brand-section { margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--bd); }
+    .brand-section:last-child { border-bottom: none; margin-bottom: 0; }
+    .brand-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--tx3); margin-bottom: 12px; }
+    .brand-colors-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+    .brand-color-swatch { width: 42px; height: 42px; border-radius: 8px; border: 2px solid var(--bd); cursor: pointer; position: relative; overflow: hidden; }
+    .brand-color-swatch input[type=color] { position: absolute; inset: -4px; opacity: 0; cursor: pointer; width: calc(100% + 8px); height: calc(100% + 8px); }
+    .brand-color-add { width: 42px; height: 42px; border-radius: 8px; border: 2px dashed var(--bd2); background: none; color: var(--tx3); font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .brand-services-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+    .brand-service-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; font-size: 12px; background: rgba(96,165,250,0.1); color: #60a5fa; border: 1px solid rgba(96,165,250,0.25); }
+    .brand-service-tag button { background: none; border: none; color: inherit; cursor: pointer; padding: 0; font-size: 11px; opacity: 0.6; line-height:1; }
+    .brand-service-tag button:hover { opacity: 1; }
+    .scraper-msg { padding: 12px 16px; border-radius: 8px; font-size: 13px; }
+    .scraper-msg.success { background: rgba(74,222,128,.08); border: 1px solid rgba(74,222,128,.3); color: #4ade80; }
+    .scraper-msg.error   { background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.3); color: #f87171; }
+    .scraper-msg.info    { background: rgba(96,165,250,.08); border: 1px solid rgba(96,165,250,.3); color: #60a5fa; }
   </style>
 </head>
 <body>
@@ -690,6 +746,42 @@
 <div id="imp-banner">
   👁️ Viewing as <strong id="imp-name">—</strong>
   <a onclick="exitImpersonation()">Exit Impersonation ✕</a>
+</div>
+
+<!-- Permission Banner — shown when company_admin selects "Review Later" -->
+<div id="perm-banner">
+  ⚠️ Content generation disabled — data usage authorization required.
+  <a onclick="showPermissionGate()">Review &amp; Authorize →</a>
+</div>
+
+<!-- Permission Gate — full-screen overlay shown on first login for company_admin -->
+<div id="permission-gate">
+  <div class="perm-card">
+    <div class="perm-logo">🔐</div>
+    <h2 class="perm-title">Data Usage Authorization</h2>
+    <p class="perm-sub">Before generating content, we need your permission to use your website data.</p>
+
+    <div class="perm-body">
+      <p>By clicking <strong>I Authorize</strong>, you grant <strong>Services Leads Marketing Hub</strong> permission to:</p>
+      <ul>
+        <li>Access and analyze your company's public website content</li>
+        <li>Extract your services, contact information, brand identity, and tone of voice</li>
+        <li>Store this data to power landing pages, ads, SEO content, and marketing materials</li>
+        <li>Automatically refresh this data every 30 days to keep content current</li>
+      </ul>
+      <p>This covers generation of: landing pages, Google Ads campaigns, SEO blog content, and related marketing materials for your company only.</p>
+      <p>You may revoke this authorization at any time from <strong>Settings → Data &amp; Privacy</strong>. Revocation immediately disables content generation until re-authorized.</p>
+      <p>Data is stored securely in Cloudflare infrastructure and never shared with third parties outside your subscription agreement.</p>
+    </div>
+
+    <div class="perm-version">Disclaimer v1.0 — Effective March 2026</div>
+
+    <div class="perm-actions">
+      <button class="btn btn-primary perm-agree-btn" onclick="grantDataPermission()">✅ I Authorize Data Usage</button>
+      <button class="btn btn-sec" onclick="reviewDataPermissionLater()">Review Later</button>
+    </div>
+    <p id="perm-error" style="display:none;color:#f87171;text-align:center;margin-top:12px;font-size:13px"></p>
+  </div>
 </div>
 
 <div class="layout">
@@ -753,6 +845,10 @@
       <div class="sb-group settings-nav">Account</div>
       <button class="nav-item settings-nav" data-section="settings" onclick="showSection('settings')">
         <span class="nav-icon">⚙️</span><span>Settings</span>
+      </button>
+      <!-- Brand Profile — company_admin only; hidden by default, shown by _applyRoleNav -->
+      <button class="nav-item co-admin-nav" data-section="brand-profile" onclick="showSection('brand-profile')" style="display:none">
+        <span class="nav-icon">🎨</span><span>Brand Profile</span>
       </button>
     </nav>
 
@@ -1571,10 +1667,122 @@
           </div>
         </div>
 
+        <!-- Data & Privacy card — company_admin only, hidden by JS -->
+        <div class="card" id="settings-dataprivacy-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title">🔐 Data &amp; Privacy</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="loadDataPrivacy()">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="dataprivacy-status" style="font-size:14px;color:var(--tx2);line-height:2">Loading…</div>
+          <div id="dataprivacy-actions" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap"></div>
+        </div>
+
         <!-- Account info card -->
         <div class="card">
           <div class="card-hd"><div class="card-title">Your Account</div></div>
           <div id="settings-account-info" style="font-size:14px;color:var(--tx2);line-height:2">Loading…</div>
+        </div>
+      </div>
+
+      <!-- BRAND PROFILE — company_admin onboarding + ongoing editing -->
+      <div class="pane" id="pane-brand-profile">
+        <div class="ph"><h2>🎨 Brand Profile</h2><p>Scan your website to extract brand data that powers all content generation.</p></div>
+
+        <!-- Scraper card -->
+        <div class="card" id="scraper-card">
+          <div class="card-hd"><div class="card-title">Scan Your Website</div></div>
+          <div id="scraper-result" style="display:none;margin-bottom:14px"></div>
+          <div class="co-form-grid">
+            <div class="ff ff-full">
+              <label>Website URL *</label>
+              <input type="url" id="scraper-url" placeholder="https://yourcompany.ca" autocomplete="off">
+            </div>
+          </div>
+          <div id="scraper-progress" style="display:none;margin-top:12px;color:var(--tx2);font-size:13px">⏳ Scanning website… this may take up to 15 seconds…</div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="scraper-btn" onclick="startScraper()">🔍 Scan Website</button>
+          </div>
+          <p style="margin-top:10px;font-size:12px;color:var(--tx3)">Can't scan? Fill in your brand details manually below — click "Manual Entry" to skip scanning.</p>
+          <div style="margin-top:6px">
+            <button class="btn btn-sec btn-sm" onclick="showManualBrandEntry()">✏️ Manual Entry</button>
+          </div>
+        </div>
+
+        <!-- Brand profile edit card (shown after scan or manual entry) -->
+        <div class="card" id="brand-profile-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title">Your Brand Profile</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="startScraper()">↻ Re-scan</button>
+              <button class="btn btn-primary btn-sm" onclick="saveBrandProfile()">💾 Save Changes</button>
+            </div>
+          </div>
+          <div id="brand-save-result" style="display:none;margin-bottom:14px"></div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Brand Colors</div>
+            <div id="brand-colors-row" class="brand-colors-row"></div>
+            <p style="font-size:12px;color:var(--tx3);margin-top:4px">Click a swatch to change color. Used in generated landing pages.</p>
+          </div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Contact Information</div>
+            <div class="co-form-grid">
+              <div class="ff"><label>Phone</label><input type="tel" id="brand-phone" placeholder="+1 (613) 555-0000"></div>
+              <div class="ff"><label>Email</label><input type="email" id="brand-email" placeholder="info@company.ca"></div>
+              <div class="ff ff-full"><label>Address</label><input type="text" id="brand-address" placeholder="123 Main St, Ottawa, ON"></div>
+            </div>
+          </div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Services Offered</div>
+            <div id="brand-services-tags" class="brand-services-row"></div>
+            <input type="text" id="brand-services-input" placeholder="Add a service and press Enter"
+              style="margin-top:8px;width:100%;max-width:380px" onkeydown="addBrandService(event)">
+          </div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Voice &amp; Tone</div>
+            <select id="brand-tone" style="max-width:220px">
+              <option value="professional">Professional</option>
+              <option value="friendly">Friendly</option>
+              <option value="urgent">Urgent</option>
+              <option value="authoritative">Authoritative</option>
+              <option value="conversational">Conversational</option>
+              <option value="technical">Technical</option>
+            </select>
+          </div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Tagline / Description</div>
+            <input type="text" id="brand-tagline" placeholder="Your company tagline or description" style="max-width:480px;width:100%">
+          </div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Logo URL</div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <input type="url" id="brand-logo" placeholder="https://..." style="flex:1;max-width:400px"
+                oninput="previewBrandLogo()">
+              <img id="brand-logo-preview" style="display:none;width:48px;height:48px;object-fit:contain;border-radius:6px;border:1px solid var(--bd)">
+            </div>
+          </div>
+
+          <div class="brand-section">
+            <div class="brand-section-title">Social Profiles</div>
+            <div class="co-form-grid">
+              <div class="ff"><label>Facebook</label><input type="url" id="brand-facebook" placeholder="https://facebook.com/..."></div>
+              <div class="ff"><label>Instagram</label><input type="url" id="brand-instagram" placeholder="https://instagram.com/..."></div>
+              <div class="ff"><label>LinkedIn</label><input type="url" id="brand-linkedin" placeholder="https://linkedin.com/company/..."></div>
+              <div class="ff"><label>YouTube</label><input type="url" id="brand-youtube" placeholder="https://youtube.com/@..."></div>
+            </div>
+          </div>
+
+          <div class="btn-row" style="margin-top:8px">
+            <button class="btn btn-primary" onclick="saveBrandProfile()">💾 Save Brand Profile</button>
+            <button class="btn btn-sec" onclick="confirmBrandProfile()">✅ Looks Good — Start Generating</button>
+          </div>
         </div>
       </div>
 

@@ -46,6 +46,11 @@ async function checkAuth() {
       if (banner) { banner.style.display = 'block'; document.body.classList.add('impersonating'); }
       if (impName) impName.textContent = `${impInfo.name || user.name} — ${impInfo.company || ''}`;
     }
+
+    // Data permission gate — company_admin must grant before generating
+    if (user.role === 'company_admin') {
+      checkPermissionStatus(); // async, non-blocking
+    }
   } catch (e) {
     if (e) window.location.replace('/login');
   }
@@ -59,6 +64,11 @@ function _applyRoleNav(role) {
   // super_admin nav items (Tenants + Companies)
   document.querySelectorAll('.super-nav').forEach(el => {
     el.style.display = isSuperAdmin ? '' : 'none';
+  });
+
+  // company_admin-only nav items (Brand Profile)
+  document.querySelectorAll('.co-admin-nav').forEach(el => {
+    el.style.display = isCompanyAdmin ? '' : 'none';
   });
 
   // Generator nav items (hidden for staff)
@@ -116,9 +126,10 @@ const SECTION_LABELS = {
   images:    'Image Library',
   reviews:   'Google Reviews',
   leads:     'Inbound Leads',
-  tenants:   'Tenant Management',
-  companies: 'Company Management',
-  settings:  'Settings'
+  tenants:       'Tenant Management',
+  companies:     'Company Management',
+  settings:      'Settings',
+  'brand-profile': 'Brand Profile'
 };
 
 function showSection(id) {
@@ -139,8 +150,9 @@ function showSection(id) {
   if (id === 'images')    { loadTemplates(); loadImageLibrary(); _populateImageDomainSelect(); }
   if (id === 'reviews')   { rvInit(); }
   if (id === 'companies') { loadCompanyMgmt(); }
-  if (id === 'tenants')   { loadTenants(); }
-  if (id === 'settings')  { loadTeam(); }
+  if (id === 'tenants')        { loadTenants(); }
+  if (id === 'settings')       { loadTeam(); loadDataPrivacy(); }
+  if (id === 'brand-profile')  { loadBrandProfile(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -2123,4 +2135,435 @@ function toast(msg, type) {
   t.textContent = msg;
   clearTimeout(_toastTimer);
   _toastTimer = setTimeout(() => { if (t.parentNode) t.parentNode.removeChild(t); }, 3000);
+}
+
+// ── DATA PERMISSION GATE ───────────────────────────────────────────────────
+
+async function checkPermissionStatus() {
+  try {
+    const r = await fetch('/api/permissions/status', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+    const d = await r.json();
+    if (d.permission_granted && !d.revoked_at) return; // authorized — all good
+    // Not yet granted or revoked — show gate or amber banner
+    if (sessionStorage.getItem('slm_perm_review_later')) {
+      showPermBanner(); // user previously chose "Review Later"
+    } else {
+      showPermissionGate();
+    }
+  } catch (e) { /* ignore — never block UI on permission check failure */ }
+}
+
+function showPermissionGate() {
+  const gate = document.getElementById('permission-gate');
+  const errEl = document.getElementById('perm-error');
+  if (gate) gate.style.display = 'block';
+  if (errEl) errEl.style.display = 'none';
+}
+
+function hidePermissionGate() {
+  const gate = document.getElementById('permission-gate');
+  if (gate) gate.style.display = 'none';
+}
+
+function showPermBanner() {
+  const b = document.getElementById('perm-banner');
+  if (b) { b.style.display = 'block'; document.body.classList.add('perm-pending'); }
+}
+
+function hidePermBanner() {
+  const b = document.getElementById('perm-banner');
+  if (b) { b.style.display = 'none'; document.body.classList.remove('perm-pending'); }
+}
+
+async function grantDataPermission() {
+  const errEl = document.getElementById('perm-error');
+  const btn   = document.querySelector('.perm-agree-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Authorizing…'; }
+  try {
+    const r = await fetch('/api/permissions/grant', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      if (errEl) { errEl.textContent = d.error || 'Authorization failed — try again'; errEl.style.display = 'block'; }
+      if (btn) { btn.disabled = false; btn.textContent = '✅ I Authorize Data Usage'; }
+      return;
+    }
+    sessionStorage.removeItem('slm_perm_review_later');
+    hidePermissionGate();
+    hidePermBanner();
+    toast('✅ Data usage authorized — now scan your website to complete setup', 'success');
+    // Take company_admin to Brand Profile to scan their website
+    showSection('brand-profile');
+  } catch (e) {
+    if (errEl) { errEl.textContent = 'Request failed — check your connection and try again'; errEl.style.display = 'block'; }
+    if (btn) { btn.disabled = false; btn.textContent = '✅ I Authorize Data Usage'; }
+  }
+}
+
+function reviewDataPermissionLater() {
+  sessionStorage.setItem('slm_perm_review_later', '1');
+  hidePermissionGate();
+  showPermBanner();
+  toast('⚠️ Content generation disabled until you authorize data usage', 'warning');
+}
+
+async function revokeDataPermission() {
+  if (!confirm('Revoke authorization? Content generation will be disabled immediately until you re-authorize.')) return;
+  try {
+    const r = await fetch('/api/permissions/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ reason: 'User requested revocation via Settings' })
+    });
+    const d = await r.json();
+    if (d.success) {
+      toast('🔒 Authorization revoked — content generation disabled', 'warning');
+      showPermBanner();
+      loadDataPrivacy();
+    } else {
+      toast(d.error || 'Revoke failed', 'error');
+    }
+  } catch (e) { toast('Request failed', 'error'); }
+}
+
+async function downloadMyData() {
+  try {
+    const r = await fetch('/api/permissions/download', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+    if (!r.ok) { toast('Export failed', 'error'); return; }
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'slm-hub-data-export.json'; a.click();
+    URL.revokeObjectURL(url);
+    toast('⬇️ Data export downloaded', 'success');
+  } catch (e) { toast('Download failed', 'error'); }
+}
+
+// ── DATA & PRIVACY SETTINGS ────────────────────────────────────────────────
+
+async function loadDataPrivacy() {
+  const card     = document.getElementById('settings-dataprivacy-card');
+  const statusEl = document.getElementById('dataprivacy-status');
+  const actionsEl= document.getElementById('dataprivacy-actions');
+  if (!card) return;
+  if (!currentUser || currentUser.role !== 'company_admin') { card.style.display = 'none'; return; }
+  card.style.display = '';
+  if (statusEl) statusEl.innerHTML = 'Loading…';
+  if (actionsEl) actionsEl.innerHTML = '';
+
+  try {
+    const r = await fetch('/api/permissions/status', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+    const d = await r.json();
+
+    const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-CA', { year:'numeric', month:'short', day:'numeric' }) : '—';
+
+    if (d.permission_granted && !d.revoked_at) {
+      statusEl.innerHTML = `
+        <div style="color:var(--green);font-weight:700;margin-bottom:6px">✅ Data usage authorized</div>
+        <div>Authorized: ${fmtDate(d.granted_at)}</div>
+        <div>Disclaimer version: ${d.disclaimer_version || 'v1.0'}</div>
+        <div>Last scan: ${fmtDate(d.scraped_at)}</div>
+        <div>Scrape status: <strong style="color:${d.scrape_status==='completed'?'var(--green)':'var(--amber)'}">${d.scrape_status || 'not scanned'}</strong></div>
+        ${d.rescan_due ? '<div style="color:var(--amber);margin-top:4px">⚠️ Brand data is over 30 days old — re-scan recommended</div>' : ''}
+      `;
+      actionsEl.innerHTML = `
+        <button class="btn btn-sec btn-sm" onclick="showSection('brand-profile')">🎨 View Brand Profile</button>
+        <button class="btn btn-danger btn-sm" onclick="revokeDataPermission()">🔒 Revoke Authorization</button>
+        <button class="btn btn-sec btn-sm" onclick="downloadMyData()">⬇️ Download My Data (GDPR)</button>
+      `;
+    } else if (d.revoked_at) {
+      statusEl.innerHTML = `
+        <div style="color:#f87171;font-weight:700;margin-bottom:6px">🔒 Authorization revoked (${fmtDate(d.revoked_at)})</div>
+        <div style="color:var(--tx3)">Content generation is disabled. Re-authorize to resume.</div>
+      `;
+      actionsEl.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="showPermissionGate()">🔓 Re-authorize Now</button>
+        <button class="btn btn-sec btn-sm" onclick="downloadMyData()">⬇️ Download My Data (GDPR)</button>
+      `;
+    } else {
+      statusEl.innerHTML = `
+        <div style="color:var(--amber);font-weight:700;margin-bottom:6px">⚠️ Authorization not granted</div>
+        <div style="color:var(--tx3)">Content generation is disabled until you authorize data usage.</div>
+      `;
+      actionsEl.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="showPermissionGate()">🔓 Authorize Now</button>
+      `;
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Failed to load permission status — refresh to try again';
+  }
+}
+
+// ── BRAND PROFILE ──────────────────────────────────────────────────────────
+
+let _brandServices = [];
+let _brandColors   = [];
+
+async function loadBrandProfile() {
+  const scraperCard    = document.getElementById('scraper-card');
+  const profileCard    = document.getElementById('brand-profile-card');
+  const scraperResult  = document.getElementById('scraper-result');
+  if (!scraperCard || !profileCard) return;
+
+  try {
+    const r = await fetch('/api/scraper/brand-profile', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+    const d = await r.json();
+    if (d.profile && d.profile.scrape_status === 'completed') {
+      _populateBrandProfileCard(d.profile);
+      scraperCard.style.display   = 'none';
+      profileCard.style.display   = '';
+      if (d.rescan_due && scraperResult) {
+        scraperResult.className     = 'scraper-msg info';
+        scraperResult.textContent   = '🔄 Brand data is over 30 days old — consider re-scanning for fresh content.';
+        scraperResult.style.display = 'block';
+        scraperCard.style.display   = '';
+        // pre-fill URL
+        const urlInput = document.getElementById('scraper-url');
+        if (urlInput && d.profile.website_url) urlInput.value = d.profile.website_url;
+      }
+    } else if (d.profile) {
+      // Profile exists but not completed — show scraper with pre-filled URL
+      profileCard.style.display = 'none';
+      scraperCard.style.display = '';
+      const urlInput = document.getElementById('scraper-url');
+      if (urlInput && d.profile.website_url) urlInput.value = d.profile.website_url;
+    } else {
+      scraperCard.style.display = '';
+      profileCard.style.display = 'none';
+    }
+  } catch (e) {
+    if (scraperResult) {
+      scraperResult.className = 'scraper-msg error';
+      scraperResult.textContent = 'Failed to load brand profile — ' + (e.message || 'unknown error');
+      scraperResult.style.display = 'block';
+    }
+  }
+}
+
+function _populateBrandProfileCard(profile) {
+  // Colors
+  _brandColors = Array.isArray(profile.brand_colors) ? [...profile.brand_colors] : [];
+  _renderBrandColors();
+
+  // Contact
+  const ci = profile.contact_info || {};
+  const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  setVal('brand-phone',   ci.phone   || '');
+  setVal('brand-email',   ci.email   || '');
+  setVal('brand-address', ci.address || '');
+
+  // Services
+  _brandServices = Array.isArray(profile.services) ? [...profile.services] : [];
+  _renderBrandServices();
+
+  // Tone
+  const toneEl = document.getElementById('brand-tone');
+  if (toneEl && profile.tone_of_voice) toneEl.value = profile.tone_of_voice;
+
+  // Tagline
+  setVal('brand-tagline', profile.tagline || '');
+
+  // Logo
+  setVal('brand-logo', profile.logo_url || '');
+  previewBrandLogo();
+
+  // Social links
+  const sl = profile.social_links || {};
+  setVal('brand-facebook',  sl.facebook  || '');
+  setVal('brand-instagram', sl.instagram || '');
+  setVal('brand-linkedin',  sl.linkedin  || '');
+  setVal('brand-youtube',   sl.youtube   || '');
+}
+
+function _renderBrandColors() {
+  const row = document.getElementById('brand-colors-row');
+  if (!row) return;
+  row.innerHTML = '';
+  _brandColors.forEach((hex, i) => {
+    const div = document.createElement('div');
+    div.className = 'brand-color-swatch';
+    div.style.background = hex;
+    div.title = hex;
+    const picker = document.createElement('input');
+    picker.type = 'color'; picker.value = hex;
+    picker.oninput = (e) => {
+      _brandColors[i] = e.target.value.toUpperCase();
+      div.style.background = _brandColors[i];
+    };
+    div.appendChild(picker);
+    row.appendChild(div);
+  });
+  // Add button (max 4 colors)
+  if (_brandColors.length < 4) {
+    const add = document.createElement('button');
+    add.className = 'brand-color-add'; add.textContent = '+';
+    add.onclick = () => { _brandColors.push('#60a5fa'); _renderBrandColors(); };
+    row.appendChild(add);
+  }
+}
+
+function _renderBrandServices() {
+  const container = document.getElementById('brand-services-tags');
+  if (!container) return;
+  container.innerHTML = '';
+  _brandServices.forEach((svc, i) => {
+    const span = document.createElement('span');
+    span.className = 'brand-service-tag';
+    span.innerHTML = `${svc} <button onclick="removeBrandService(${i})" title="Remove">✕</button>`;
+    container.appendChild(span);
+  });
+}
+
+function addBrandService(event) {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  const input = document.getElementById('brand-services-input');
+  if (!input) return;
+  const val = input.value.trim();
+  if (val && !_brandServices.includes(val)) {
+    _brandServices.push(val);
+    _renderBrandServices();
+  }
+  input.value = '';
+}
+
+function removeBrandService(index) {
+  _brandServices.splice(index, 1);
+  _renderBrandServices();
+}
+
+function previewBrandLogo() {
+  const url     = (document.getElementById('brand-logo') || {}).value || '';
+  const preview = document.getElementById('brand-logo-preview');
+  if (!preview) return;
+  if (url) { preview.src = url; preview.style.display = ''; preview.onerror = () => { preview.style.display = 'none'; }; }
+  else preview.style.display = 'none';
+}
+
+function showManualBrandEntry() {
+  const profileCard = document.getElementById('brand-profile-card');
+  if (profileCard) {
+    _brandServices = []; _brandColors = [];
+    _renderBrandColors(); _renderBrandServices();
+    profileCard.style.display = '';
+  }
+}
+
+async function startScraper() {
+  const urlInput    = document.getElementById('scraper-url');
+  const btn         = document.getElementById('scraper-btn');
+  const progress    = document.getElementById('scraper-progress');
+  const resultEl    = document.getElementById('scraper-result');
+  const profileCard = document.getElementById('brand-profile-card');
+
+  if (!urlInput || !urlInput.value.trim()) { toast('Enter your website URL first', 'warning'); return; }
+
+  if (btn)      { btn.disabled = true; btn.textContent = '⏳ Scanning…'; }
+  if (progress) progress.style.display = 'block';
+  if (resultEl) resultEl.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/scraper/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ website_url: urlInput.value.trim() })
+    });
+    const d = await r.json();
+
+    if (!r.ok) {
+      if (resultEl) {
+        resultEl.className = 'scraper-msg error';
+        resultEl.innerHTML = `❌ ${d.error || 'Scan failed'}${d.code === 'PERMISSION_REQUIRED' ? ' — <a onclick="showPermissionGate()">Authorize first →</a>' : ''}<br><small style="color:var(--tx3)">Try manual entry below.</small>`;
+        resultEl.style.display = 'block';
+      }
+      return;
+    }
+
+    // Success — populate brand profile card
+    const profile = {
+      brand_colors: d.brand_colors || [],
+      contact_info: { phone: d.phone || '', email: d.email || '', address: '' },
+      services:     d.services     || [],
+      tone_of_voice:d.tone_of_voice|| 'professional',
+      tagline:      d.tagline      || '',
+      logo_url:     d.logo_url     || '',
+      social_links: d.social_links || {}
+    };
+    _populateBrandProfileCard(profile);
+    if (profileCard) profileCard.style.display = '';
+    if (resultEl) {
+      resultEl.className = 'scraper-msg success';
+      resultEl.textContent = `✅ Scan complete — ${d.services?.length || 0} services, ${d.brand_colors?.length || 0} colors, tone: ${d.tone_of_voice}. Review and save below.`;
+      resultEl.style.display = 'block';
+    }
+    toast('✅ Website scanned successfully', 'success');
+  } catch (e) {
+    if (resultEl) {
+      resultEl.className = 'scraper-msg error';
+      resultEl.textContent = 'Scan failed: ' + (e.message || 'network error');
+      resultEl.style.display = 'block';
+    }
+  } finally {
+    if (btn)      { btn.disabled = false; btn.textContent = '🔍 Scan Website'; }
+    if (progress) progress.style.display = 'none';
+  }
+}
+
+async function saveBrandProfile() {
+  const resultEl = document.getElementById('brand-save-result');
+  const getVal   = (id) => (document.getElementById(id) || {}).value || '';
+
+  const payload = {
+    website_url:   getVal('scraper-url') || '',
+    phone:         getVal('brand-phone'),
+    email:         getVal('brand-email'),
+    address:       getVal('brand-address'),
+    services:      _brandServices,
+    tone_of_voice: getVal('brand-tone'),
+    tagline:       getVal('brand-tagline'),
+    logo_url:      getVal('brand-logo'),
+    brand_colors:  _brandColors,
+    social_links: {
+      facebook:  getVal('brand-facebook')  || undefined,
+      instagram: getVal('brand-instagram') || undefined,
+      linkedin:  getVal('brand-linkedin')  || undefined,
+      youtube:   getVal('brand-youtube')   || undefined
+    }
+  };
+  // Remove empty social links
+  Object.keys(payload.social_links).forEach(k => { if (!payload.social_links[k]) delete payload.social_links[k]; });
+
+  try {
+    const r = await fetch('/api/scraper/brand-profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (d.success) {
+      if (resultEl) {
+        resultEl.className = 'scraper-msg success';
+        resultEl.textContent = '✅ Brand profile saved successfully';
+        resultEl.style.display = 'block';
+        setTimeout(() => { if (resultEl) resultEl.style.display = 'none'; }, 3000);
+      }
+      toast('✅ Brand profile saved', 'success');
+    } else {
+      if (resultEl) {
+        resultEl.className = 'scraper-msg error';
+        resultEl.textContent = d.error || 'Save failed';
+        resultEl.style.display = 'block';
+      }
+    }
+  } catch (e) {
+    toast('Save failed: ' + (e.message || 'error'), 'error');
+  }
+}
+
+async function confirmBrandProfile() {
+  await saveBrandProfile();
+  toast('🎉 Brand profile confirmed — you can now generate content!', 'success');
+  showSection('landing');
 }

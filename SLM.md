@@ -29,7 +29,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`, `company_websites`, `data_permissions`
 
 ### R2 Bucket
 - **Name:** `slm-hub-images`
@@ -82,6 +82,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0008_domain_registrations.sql` | Adds Porkbun sync columns (whois_privacy, security_lock, labels, domain_id, imported_at, updated_at) + 5 indexes to pre-existing `domain_registrations` table |
 | `migrations/0009_template_column.sql` | Adds `template INTEGER DEFAULT NULL` to `domains` table + `idx_domains_template` index — already applied to production on 2026-03-28 |
 | `migrations/0010_tenant_system.sql` | Documents `tenants`, `tenant_invitations`, `subscription_plans` tables — already applied directly on production (2026-03-29); safe to run on fresh DB with CREATE TABLE IF NOT EXISTS |
+| `migrations/0011_scraper_permission.sql` | Documents `company_websites`, `data_permissions` tables + 4 indexes — already applied directly on production (2026-03-29); safe to run on fresh DB |
 
 ---
 
@@ -273,6 +274,18 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **User limit enforcement**: `POST /api/team/invite` checks `tenants.max_users` against active user count for the company; returns 403 with upgrade prompt if at limit; limit is read from D1 `tenants` table — never hardcoded
 - **Subscription plans from D1**: `GET /api/subscription-plans` serves 4 plans from D1 — never hardcode plan names or prices; plan limits (max_domains, max_users, features) always read from `subscription_plans` table
 - **Tenant invitation token**: 32-byte hex string (64 chars) via `generateToken(32)`; single-use (status `pending` → `accepted`); expires in 7 days; checked in both validate and accept endpoints
+- **Data Permission Gate built (2026-03-29)**: `data_permissions` + `company_websites` tables confirmed in D1; full permission grant/revoke/download API built; `#permission-gate` full-screen overlay shown on first login for company_admin; `#perm-banner` amber banner shown when "Review Later" selected; both stored in sessionStorage `slm_perm_review_later`
+- **Data permission check in generators**: `POST /api/generate/landing-page`, `POST /api/generate/ads-campaign`, `POST /api/generate/seo-content` all check `data_permissions.permission_granted=1 AND revoked_at IS NULL` + `company_websites.scrape_status='completed'` for company_admin users; super_admin bypasses all checks
+- **Website scraper uses `fetch()` not Browser Rendering API**: `POST /api/scraper/scan` uses plain `fetch(url)` to get HTML then regex-parses phone, email, logo (og:image), tagline (og:description), services (h2/h3 headings), brand colors (CSS hex frequency), social links; works for static/SSR sites; JS-heavy SPAs return limited data
+- **Tone analysis via Anthropic Claude**: `analyzeWebsiteTone(apiKey, text)` calls `claude-3-5-haiku-20241022` with max_tokens=20; returns one of 6 tone values; requires `ANTHROPIC_API_KEY` CF Pages secret; gracefully falls back to `'professional'` if key absent or API fails
+- **`ANTHROPIC_API_KEY` added to Bindings type**: set via `echo "KEY" | npx wrangler pages secret put ANTHROPIC_API_KEY --project-name services-leads-marketing-hub` then redeploy
+- **Scraper data enriches LP generation**: after fetching company data from D1, `POST /api/generate/landing-page` also reads `company_websites` row; overrides company phone if empty, overrides template colors with brand colors if available; invisible HTML comment `<!-- SLM-AUDIT: generated=... company_id=... scrape_status=... -->` appended before `</html>`
+- **30-day rescan TTL via KV**: each successful scrape sets KV key `scraper:next_scan:{company_id}` with 30-day TTL; `GET /api/permissions/status` and `GET /api/scraper/brand-profile` return `rescan_due: true` when key is absent (expired); UI shows rescan recommendation
+- **Brand profile pane**: `pane-brand-profile` accessible via Brand Profile nav item (`.co-admin-nav`, hidden for super_admin/staff); has scraper card + editable brand card with colors (color picker swatches), contact info, services (tags with Enter-to-add), voice/tone dropdown, tagline, logo preview, social profiles
+- **`co-admin-nav` CSS class**: nav items with this class shown only for `company_admin` role — handled in `_applyRoleNav()`; used for Brand Profile nav item
+- **Permission management in Settings**: Data & Privacy card in `pane-settings` (hidden for non-company_admin); shows permission status, revoke button, re-authorize link, GDPR download; `loadDataPrivacy()` called when Settings tab is opened
+- **GDPR data export**: `GET /api/permissions/download` returns JSON with user profile, company info, data_permissions record, brand profile, lead count; downloaded as `slm-hub-data-export.json` via blob URL trick
+- **`scrape_status = 'completed'` on manual save**: `PATCH /api/scraper/brand-profile` sets `scrape_status='completed'` — satisfies generation check even without auto-scan; manual entry is the fallback path for sites that don't scrape well
 
 ---
 
@@ -295,6 +308,37 @@ SLM Hub is a white-label multi-tenant SaaS platform. Three-tier role hierarchy:
 **Plan limits:** Never hardcode. Read `max_domains` and `max_users` from `tenants` table. Read plan features from `subscription_plans` table.
 
 **Invitation tokens:** 32-byte hex (64 chars), single-use, 7-day expiry. Invalidated on acceptance.
+
+---
+
+## DATA PERMISSION DOCTRINE
+
+All content generation for tenant (company_admin) accounts requires two pre-conditions:
+
+1. **Permission granted** — `data_permissions.permission_granted = 1` AND `revoked_at IS NULL`. The company_admin must explicitly accept the Data Usage Authorization disclaimer (v1.0). This is a legal/compliance requirement, not optional.
+
+2. **Brand profile complete** — `company_websites.scrape_status = 'completed'`. The company's website must have been scanned (auto or manual entry) so generators have real brand data to work with.
+
+**Super admin bypasses both checks.** All other roles are checked at every generate endpoint.
+
+**Authorization flow:**
+1. company_admin first login → `#permission-gate` full-screen overlay shown
+2. "I Authorize" → `POST /api/permissions/grant` → saves IP, timestamp, disclaimer version → gate dismissed → redirect to Brand Profile
+3. "Review Later" → amber `#perm-banner` shown → sessionStorage `slm_perm_review_later` set → generation blocked
+4. After granting: scan website via `POST /api/scraper/scan` or manual entry via `PATCH /api/scraper/brand-profile` → `scrape_status = 'completed'` → generation unlocked
+
+**Revocation:**
+- Settings → Data & Privacy → Revoke Authorization → `POST /api/permissions/revoke` → `revoked_at` set → generation immediately disabled
+- Re-authorize via Settings → Data & Privacy → "Re-authorize Now" → shows `#permission-gate` again
+
+**Scraper data use in generation:**
+- `brand_colors` → overrides LP template colors
+- `contact_info.phone` → fills company phone if empty in companies table
+- `scrape_status` logged in HTML audit comment: `<!-- SLM-AUDIT: generated=ISO company_id=N scrape_status=completed permission=v1.0 -->`
+
+**No invented data:** Claude prompts in all generators must include company data pulled exclusively from `company_websites` and `companies` D1 tables. Never invent services, phone numbers, colors, or testimonials.
+
+**GDPR export:** `GET /api/permissions/download` returns all personal data as JSON. Available in Settings → Data & Privacy.
 
 ---
 

@@ -14,6 +14,7 @@ type Bindings = {
   GOOGLE_ADS_CLIENT_ID: string
   GOOGLE_ADS_CLIENT_SECRET: string
   GOOGLE_PLACES_API_KEY: string
+  ANTHROPIC_API_KEY: string
 }
 // Real review row from google_reviews D1 table
 type ReviewRow = {
@@ -1373,6 +1374,24 @@ app.post('/api/generate/landing-page', async (c) => {
     }
   }
 
+  // Data Permission Gate: company_admin must have granted permission + completed scrape
+  if (user && user.role === 'company_admin' && user.company_id && c.env?.DB) {
+    try {
+      const perm = await c.env.DB.prepare(
+        'SELECT permission_granted, revoked_at FROM data_permissions WHERE company_id = ?'
+      ).bind(user.company_id).first() as any
+      if (!perm || !perm.permission_granted || perm.revoked_at) {
+        return c.json({ error: 'Data usage authorization required — go to Settings → Data & Privacy', code: 'PERMISSION_REQUIRED' }, 403)
+      }
+      const site = await c.env.DB.prepare(
+        "SELECT scrape_status FROM company_websites WHERE company_id = ?"
+      ).bind(user.company_id).first() as any
+      if (!site || (site.scrape_status !== 'completed')) {
+        return c.json({ error: 'Brand profile required — scan your website in Brand Profile before generating content', code: 'SCRAPE_REQUIRED' }, 403)
+      }
+    } catch (_) {}
+  }
+
   const detected = detectCompany(domain, keyword, co)
 
   // ── Fetch company data from D1 ─────────────────────────────────────────
@@ -1483,7 +1502,40 @@ app.post('/api/generate/landing-page', async (c) => {
     } catch (_) {}
   }
 
-  const html     = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo', tplConfig, realReviews)
+  // Inject scraped brand data (enrich company data + template with real brand info)
+  let scraperData: any = null
+  const lookupCoId = user?.company_id || companyId
+  if (c.env?.DB && lookupCoId) {
+    try {
+      scraperData = await c.env.DB.prepare(
+        "SELECT * FROM company_websites WHERE company_id = ? AND scrape_status = 'completed'"
+      ).bind(lookupCoId).first() as any
+      if (scraperData && companyData) {
+        // Override phone if company record has none but scraper found one
+        if (scraperData.contact_info) {
+          try {
+            const ci = JSON.parse(scraperData.contact_info)
+            if (ci?.phone && !companyData.phone) companyData.phone = ci.phone
+          } catch (_) {}
+        }
+        // Override template colors with brand colors if available
+        if (scraperData.brand_colors) {
+          try {
+            const bc = JSON.parse(scraperData.brand_colors) as string[]
+            if (bc.length >= 2) { tplConfig.bg = bc[0]; tplConfig.accent = bc[1] }
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  const rawHtml   = generateLandingPage(keyword, service, domain, detected, companyData, mode as 'ppc' | 'seo', tplConfig, realReviews)
+  // Invisible audit trail comment (DATA PERMISSION DOCTRINE)
+  const auditTs   = new Date().toISOString()
+  const auditCoId = lookupCoId || 'n/a'
+  const auditScrape = scraperData?.scrape_status || 'none'
+  const auditComment = `<!-- SLM-AUDIT: generated=${auditTs} company_id=${auditCoId} scrape_status=${auditScrape} permission=v1.0 -->`
+  const html      = rawHtml.replace('</html>', `${auditComment}\n</html>`)
   const checklist = validateLP(html, mode as 'ppc' | 'seo')
   return c.json({ html, company: detected, brand: companyData.name, domain, template: tplConfig.number, templateName: tplConfig.name, checklist })
 })
@@ -1495,6 +1547,13 @@ app.post('/api/generate/ads-campaign', async (c) => {
   if (user && user.role === 'company_admin' && user.company_id && c.env?.DB) {
     const domRow = await c.env.DB.prepare('SELECT company_id FROM domains WHERE domain = ?').bind(domain).first() as any
     if (domRow && domRow.company_id !== null && domRow.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+    // Data permission + scrape check
+    try {
+      const perm = await c.env.DB.prepare('SELECT permission_granted, revoked_at FROM data_permissions WHERE company_id = ?').bind(user.company_id).first() as any
+      if (!perm || !perm.permission_granted || perm.revoked_at) return c.json({ error: 'Data usage authorization required — go to Settings → Data & Privacy', code: 'PERMISSION_REQUIRED' }, 403)
+      const site = await c.env.DB.prepare("SELECT scrape_status FROM company_websites WHERE company_id = ?").bind(user.company_id).first() as any
+      if (!site || site.scrape_status !== 'completed') return c.json({ error: 'Brand profile required — scan your website in Brand Profile first', code: 'SCRAPE_REQUIRED' }, 403)
+    } catch (_) {}
   }
   const detected = detectCompany(domain, keyword, co)
   return c.json({ ...generateAdsCampaign(domain, service, keyword, detected), generatedAt: new Date().toISOString() })
@@ -1507,6 +1566,13 @@ app.post('/api/generate/seo-content', async (c) => {
   if (user && user.role === 'company_admin' && user.company_id && c.env?.DB) {
     const domRow = await c.env.DB.prepare('SELECT company_id FROM domains WHERE domain = ?').bind(domain).first() as any
     if (domRow && domRow.company_id !== null && domRow.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+    // Data permission + scrape check
+    try {
+      const perm = await c.env.DB.prepare('SELECT permission_granted, revoked_at FROM data_permissions WHERE company_id = ?').bind(user.company_id).first() as any
+      if (!perm || !perm.permission_granted || perm.revoked_at) return c.json({ error: 'Data usage authorization required — go to Settings → Data & Privacy', code: 'PERMISSION_REQUIRED' }, 403)
+      const site = await c.env.DB.prepare("SELECT scrape_status FROM company_websites WHERE company_id = ?").bind(user.company_id).first() as any
+      if (!site || site.scrape_status !== 'completed') return c.json({ error: 'Brand profile required — scan your website in Brand Profile first', code: 'SCRAPE_REQUIRED' }, 403)
+    } catch (_) {}
   }
   const detected = detectCompany(domain, keyword, co)
   return c.json(generateSeoContent(domain, keyword, service, detected))
@@ -2944,6 +3010,429 @@ app.patch('/api/images/:id/approve', async (c) => {
     return c.json({ success: true })
   } catch (err: any) {
     return c.json({ error: 'Approve failed', detail: err?.message }, 500)
+  }
+})
+
+// ── WEBSITE SCRAPER HELPERS ───────────────────────────────────────────────
+
+type ScraperResult = {
+  phone?: string; email?: string; logo_url?: string; tagline?: string
+  about_text?: string; services?: string[]; brand_colors?: string[]
+  social_links?: Record<string, string>; raw_content?: string; error?: string
+}
+
+async function scrapeWebsite(url: string): Promise<ScraperResult> {
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SLMHubBot/1.0; +https://slm-hub.ca)', 'Accept': 'text/html,*/*' },
+      redirect: 'follow'
+    })
+    if (!res.ok) return { error: `HTTP ${res.status}` }
+    const fullHtml = await res.text()
+    const html = fullHtml.slice(0, 500000) // 500KB max
+
+    // Phone — prefer tel: links, fallback to North American phone pattern
+    let phone = ''
+    const telM = html.match(/href=["']tel:([+\d\s()./-]{7,20})["']/i)
+    if (telM) phone = telM[1].trim()
+    if (!phone) { const pM = html.match(/(?:\+1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/); if (pM) phone = pM[0].trim() }
+
+    // Email — prefer mailto: links
+    let email = ''
+    const mailM = html.match(/href=["']mailto:([^"'?#\s]+)/i)
+    if (mailM) email = mailM[1].trim()
+
+    // Logo — og:image meta tag
+    let logo_url = ''
+    const ogImg = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
+              || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
+    if (ogImg) logo_url = ogImg[1].trim()
+
+    // Tagline — og:description or meta description (first 200 chars)
+    let tagline = ''
+    const ogDesc = html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']{10,200})["']/i)
+               || html.match(/<meta[^>]+content=["']([^"']{10,200})["'][^>]+property=["']og:description["']/i)
+    if (ogDesc) tagline = ogDesc[1].replace(/\s+/g, ' ').trim()
+    if (!tagline) {
+      const metaDesc = html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']{10,200})["']/i)
+                    || html.match(/<meta[^>]+content=["']([^"']{10,200})["'][^>]+name=["']description["']/i)
+      if (metaDesc) tagline = metaDesc[1].replace(/\s+/g, ' ').trim()
+    }
+
+    // About text — first section/div with "about" in id or class
+    let about_text = ''
+    const aboutM = html.match(/<(?:section|div)[^>]+(?:id|class)=["'][^"']*about[^"']*["'][^>]*>([\s\S]{20,600}?)<\/(?:section|div)>/i)
+    if (aboutM) about_text = aboutM[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400)
+
+    // Services — h2/h3 headings that look like service names (not nav/UI labels)
+    const services: string[] = []
+    const skipWords = /^(our|why|who|how|what|home|contact|about|blog|faq|get|call|read|view|learn|find|meet|click|tap|see|welcome|hello|follow|join|sign|log|404|error|menu|close|open|back)/i
+    const h2Matches = Array.from(html.matchAll(/<h[23][^>]*>([^<]{5,80})<\/h[23]>/gi)).slice(0, 12)
+    for (const m of h2Matches) {
+      const text = m[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+      if (text.length >= 5 && text.length <= 80 && !skipWords.test(text) && !text.match(/^\d+$/)) {
+        services.push(text)
+      }
+    }
+
+    // Brand colors — top 3 non-common CSS hex colors by frequency
+    const noBrand = new Set(['#000000','#FFFFFF','#FFFFFF','#333333','#666666','#999999','#CCCCCC','#EEEEEE','#F5F5F5','#F9F9F9','#111111','#222222','#444444','#555555','#777777','#888888','#AAAAAA','#BBBBBB','#DDDDDD'])
+    const cssOnly = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/<img[^>]+>/gi, '')
+    const hexCounts: Record<string, number> = {}
+    for (const m of Array.from(cssOnly.matchAll(/#([0-9a-fA-F]{6})\b/g))) {
+      const hex = `#${m[1].toUpperCase()}`
+      if (!noBrand.has(hex)) hexCounts[hex] = (hexCounts[hex] || 0) + 1
+    }
+    const brand_colors = Object.entries(hexCounts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([h]) => h)
+
+    // Social links — extract first occurrence of each platform
+    const social_links: Record<string, string> = {}
+    const socialPats: Array<[string, RegExp]> = [
+      ['facebook',  /https?:\/\/(?:www\.)?facebook\.com\/[a-zA-Z0-9._/-]+/],
+      ['instagram', /https?:\/\/(?:www\.)?instagram\.com\/[a-zA-Z0-9._/-]+/],
+      ['twitter',   /https?:\/\/(?:www\.)?(?:twitter|x)\.com\/[a-zA-Z0-9._/-]+/],
+      ['linkedin',  /https?:\/\/(?:www\.)?linkedin\.com\/(?:company\/|in\/)[a-zA-Z0-9._/-]+/],
+      ['youtube',   /https?:\/\/(?:www\.)?youtube\.com\/(?:channel\/|@)[a-zA-Z0-9._/-]+/],
+    ]
+    for (const [platform, pat] of socialPats) { const m = html.match(pat); if (m) social_links[platform] = m[0] }
+
+    // Raw content — strip tags, collapse whitespace, first 1500 chars
+    const raw_content = html.replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1500)
+
+    return {
+      phone:        phone        || undefined,
+      email:        email        || undefined,
+      logo_url:     logo_url     || undefined,
+      tagline:      tagline      || undefined,
+      about_text:   about_text   || undefined,
+      services:     services.length ? services.slice(0, 8) : undefined,
+      brand_colors: brand_colors.length ? brand_colors : undefined,
+      social_links: Object.keys(social_links).length ? social_links : undefined,
+      raw_content
+    }
+  } catch (err: any) {
+    return { error: err?.message || 'Scrape failed' }
+  }
+}
+
+async function analyzeWebsiteTone(apiKey: string, text: string): Promise<string> {
+  const VALID_TONES = ['professional', 'friendly', 'urgent', 'authoritative', 'conversational', 'technical']
+  if (!apiKey || !text) return 'professional'
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({
+        model: 'claude-3-5-haiku-20241022',
+        max_tokens: 20,
+        messages: [{
+          role: 'user',
+          content: `Analyze the tone of this business website. Reply with ONLY ONE word from: professional, friendly, urgent, authoritative, conversational, technical\n\nContent: ${text.slice(0, 800)}`
+        }]
+      })
+    })
+    const data = await res.json() as any
+    const tone = (data?.content?.[0]?.text || '').trim().toLowerCase().replace(/[^a-z]/g, '')
+    return VALID_TONES.includes(tone) ? tone : 'professional'
+  } catch { return 'professional' }
+}
+
+// ── DATA PERMISSIONS API ──────────────────────────────────────────────────
+// All permission endpoints are for company_admin (or super_admin for audit purposes)
+
+// GET /api/permissions/status — current permission + scrape status for company
+app.get('/api/permissions/status', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  if (!c.env?.DB) return c.json({ permission_granted: false, scrape_status: 'pending' })
+
+  const companyId = user.company_id
+  if (!companyId) return c.json({ permission_granted: true, scrape_status: 'n/a', role: user.role })
+
+  try {
+    const [perm, site] = await Promise.all([
+      c.env.DB.prepare('SELECT * FROM data_permissions WHERE company_id = ?').bind(companyId).first() as Promise<any>,
+      c.env.DB.prepare('SELECT scrape_status, scraped_at FROM company_websites WHERE company_id = ?').bind(companyId).first() as Promise<any>
+    ])
+    // Check 30-day rescan KV flag
+    let rescan_due = false
+    if (c.env?.KV) {
+      const scanKey = await c.env.KV.get(`scraper:next_scan:${companyId}`)
+      rescan_due = !scanKey
+    }
+    return c.json({
+      permission_granted: perm?.permission_granted ? true : false,
+      granted_at:         perm?.granted_at  || null,
+      revoked_at:         perm?.revoked_at  || null,
+      disclaimer_version: perm?.disclaimer_version || null,
+      allowed_uses:       perm?.allowed_uses ? JSON.parse(perm.allowed_uses) : [],
+      scrape_status:      site?.scrape_status || 'pending',
+      scraped_at:         site?.scraped_at   || null,
+      rescan_due
+    })
+  } catch (err: any) {
+    return c.json({ error: 'Status check failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/permissions/grant — save data usage authorization (company_admin only)
+app.post('/api/permissions/grant', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'company_admin') return c.json({ error: 'Forbidden — company_admin only' }, 403)
+  if (!user.company_id) return c.json({ error: 'No company associated with account' }, 400)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+
+  const now       = new Date().toISOString()
+  const ip        = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || ''
+  const allowedUses = JSON.stringify(['landing_pages', 'ads_campaigns', 'seo_content', 'blog_posts'])
+
+  try {
+    await c.env.DB.prepare(`
+      INSERT INTO data_permissions (company_id, permission_granted, granted_by, granted_at, ip_address, disclaimer_version, allowed_uses, revoked_at, revoked_reason)
+      VALUES (?, 1, ?, ?, ?, 'v1.0', ?, NULL, NULL)
+      ON CONFLICT(company_id) DO UPDATE SET
+        permission_granted=1, granted_by=excluded.granted_by, granted_at=excluded.granted_at,
+        ip_address=excluded.ip_address, disclaimer_version='v1.0', allowed_uses=excluded.allowed_uses,
+        revoked_at=NULL, revoked_reason=NULL
+    `).bind(user.company_id, user.email, now, ip, allowedUses).run()
+
+    return c.json({ success: true, granted_at: now, disclaimer_version: 'v1.0' })
+  } catch (err: any) {
+    return c.json({ error: 'Grant failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/permissions/revoke — revoke authorization (company_admin or super_admin)
+app.post('/api/permissions/revoke', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'company_admin' && user.role !== 'super_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+
+  const companyId = user.role === 'super_admin'
+    ? (await c.req.json().catch(() => ({}))).company_id || user.company_id
+    : user.company_id
+  if (!companyId) return c.json({ error: 'company_id required' }, 400)
+
+  const { reason = 'User requested revocation' } = await c.req.json().catch(() => ({}))
+  const now = new Date().toISOString()
+
+  try {
+    await c.env.DB.prepare(
+      'UPDATE data_permissions SET permission_granted=0, revoked_at=?, revoked_reason=? WHERE company_id=?'
+    ).bind(now, reason, companyId).run()
+    return c.json({ success: true, revoked_at: now })
+  } catch (err: any) {
+    return c.json({ error: 'Revoke failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/permissions/download — GDPR data export (company_admin only)
+app.get('/api/permissions/download', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'company_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!user.company_id) return c.json({ error: 'No company' }, 400)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+
+  try {
+    const [perm, site, company, leadCount] = await Promise.all([
+      c.env.DB.prepare('SELECT * FROM data_permissions WHERE company_id = ?').bind(user.company_id).first() as Promise<any>,
+      c.env.DB.prepare('SELECT id, website_url, scraped_at, tone_of_voice, services, tagline, logo_url, social_links, scrape_status FROM company_websites WHERE company_id = ?').bind(user.company_id).first() as Promise<any>,
+      c.env.DB.prepare('SELECT id, name, phone, domain, color_bg, color_accent FROM companies WHERE id = ?').bind(user.company_id).first() as Promise<any>,
+      c.env.DB.prepare('SELECT COUNT(*) as cnt FROM leads WHERE company = (SELECT key FROM companies WHERE id = ?)').bind(user.company_id).first() as Promise<any>
+    ])
+    const export_data = {
+      exported_at:       new Date().toISOString(),
+      exported_by:       user.email,
+      user_profile:      { id: user.id, email: user.email, name: user.name, role: user.role },
+      company:           company || null,
+      data_permission:   perm   || null,
+      brand_profile:     site   || null,
+      lead_count:        (leadCount as any)?.cnt || 0,
+      platform:          'Services Leads Marketing Hub (SLM Hub)',
+      data_location:     'Cloudflare D1 — ENAM region',
+      disclaimer_version:'v1.0'
+    }
+    const headers = new Headers({ 'Content-Type': 'application/json', 'Content-Disposition': 'attachment; filename="slm-hub-data-export.json"' })
+    return new Response(JSON.stringify(export_data, null, 2), { headers })
+  } catch (err: any) {
+    return c.json({ error: 'Export failed', detail: err?.message }, 500)
+  }
+})
+
+// ── WEBSITE SCRAPER API ───────────────────────────────────────────────────
+
+// POST /api/scraper/scan — scrape website + tone analysis + save to company_websites
+app.post('/api/scraper/scan', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'company_admin') return c.json({ error: 'Forbidden — company_admin only' }, 403)
+  if (!user.company_id) return c.json({ error: 'No company associated with account' }, 400)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+
+  // Permission must be granted before scanning
+  try {
+    const perm = await c.env.DB.prepare('SELECT permission_granted, revoked_at FROM data_permissions WHERE company_id = ?').bind(user.company_id).first() as any
+    if (!perm || !perm.permission_granted || perm.revoked_at) {
+      return c.json({ error: 'Data usage authorization required before scanning — go to Settings → Data & Privacy', code: 'PERMISSION_REQUIRED' }, 403)
+    }
+  } catch (_) {}
+
+  const { website_url } = await c.req.json()
+  if (!website_url) return c.json({ error: 'website_url required' }, 400)
+  // Basic URL validation
+  let safeUrl = website_url.trim()
+  if (!safeUrl.match(/^https?:\/\//i)) safeUrl = `https://${safeUrl}`
+  try { new URL(safeUrl) } catch { return c.json({ error: 'Invalid URL' }, 400) }
+
+  const now = new Date().toISOString()
+
+  // Mark as scanning
+  try {
+    await c.env.DB.prepare(`
+      INSERT INTO company_websites (company_id, website_url, scrape_status)
+      VALUES (?, ?, 'scanning')
+      ON CONFLICT(company_id) DO UPDATE SET website_url=excluded.website_url, scrape_status='scanning'
+    `).bind(user.company_id, safeUrl).run()
+  } catch (_) {}
+
+  // Run scraper
+  const scraped = await scrapeWebsite(safeUrl)
+
+  if (scraped.error) {
+    // Mark as failed but keep the URL
+    try {
+      await c.env.DB.prepare("UPDATE company_websites SET scrape_status='failed', scraped_at=? WHERE company_id=?")
+        .bind(now, user.company_id).run()
+    } catch (_) {}
+    return c.json({ error: `Scrape failed: ${scraped.error}`, code: 'SCRAPE_FAILED', website_url: safeUrl }, 422)
+  }
+
+  // Run tone analysis via Anthropic (graceful fallback)
+  const tone = scraped.raw_content
+    ? await analyzeWebsiteTone(c.env?.ANTHROPIC_API_KEY || '', scraped.raw_content)
+    : 'professional'
+
+  // Save to company_websites
+  try {
+    await c.env.DB.prepare(`
+      UPDATE company_websites SET
+        scraped_at=?, brand_colors=?, tone_of_voice=?, services=?, contact_info=?,
+        about_text=?, tagline=?, logo_url=?, social_links=?, raw_content=?, scrape_status='completed'
+      WHERE company_id=?
+    `).bind(
+      now,
+      JSON.stringify(scraped.brand_colors || []),
+      tone,
+      JSON.stringify(scraped.services || []),
+      JSON.stringify({ phone: scraped.phone || '', email: scraped.email || '', address: '' }),
+      scraped.about_text || '',
+      scraped.tagline    || '',
+      scraped.logo_url   || '',
+      JSON.stringify(scraped.social_links || {}),
+      scraped.raw_content || '',
+      user.company_id
+    ).run()
+
+    // Set 30-day rescan KV TTL
+    if (c.env?.KV) {
+      await c.env.KV.put(`scraper:next_scan:${user.company_id}`, now, { expirationTtl: 60 * 60 * 24 * 30 })
+    }
+  } catch (err: any) {
+    return c.json({ error: 'Save failed', detail: err?.message }, 500)
+  }
+
+  return c.json({
+    success: true, scraped_at: now, website_url: safeUrl,
+    phone:        scraped.phone        || null,
+    email:        scraped.email        || null,
+    logo_url:     scraped.logo_url     || null,
+    tagline:      scraped.tagline      || null,
+    about_text:   scraped.about_text   || null,
+    services:     scraped.services     || [],
+    brand_colors: scraped.brand_colors || [],
+    tone_of_voice: tone,
+    social_links: scraped.social_links || {}
+  })
+})
+
+// GET /api/scraper/brand-profile — get brand profile for current company_admin
+app.get('/api/scraper/brand-profile', async (c) => {
+  const user = c.get('user')
+  if (!user) return c.json({ error: 'Unauthorized' }, 401)
+  if (!c.env?.DB) return c.json({ profile: null })
+
+  const companyId = user.company_id
+  if (!companyId) return c.json({ profile: null })
+
+  try {
+    const row = await c.env.DB.prepare('SELECT * FROM company_websites WHERE company_id = ?').bind(companyId).first() as any
+    if (!row) return c.json({ profile: null })
+    // Check rescan TTL
+    let rescan_due = false
+    if (c.env?.KV) { const k = await c.env.KV.get(`scraper:next_scan:${companyId}`); rescan_due = !k }
+    const profile = {
+      ...row,
+      brand_colors: row.brand_colors ? JSON.parse(row.brand_colors) : [],
+      services:     row.services     ? JSON.parse(row.services)     : [],
+      contact_info: row.contact_info ? JSON.parse(row.contact_info) : {},
+      social_links: row.social_links ? JSON.parse(row.social_links) : {}
+    }
+    return c.json({ profile, rescan_due })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load profile', detail: err?.message }, 500)
+  }
+})
+
+// PATCH /api/scraper/brand-profile — save manual brand profile edits (company_admin only)
+app.patch('/api/scraper/brand-profile', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'company_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!user.company_id) return c.json({ error: 'No company' }, 400)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+
+  const body = await c.req.json()
+  const { website_url, phone, email, address, services, tone_of_voice, tagline, logo_url, brand_colors, social_links } = body
+
+  const now = new Date().toISOString()
+  const contactInfo = JSON.stringify({ phone: phone || '', email: email || '', address: address || '' })
+
+  try {
+    await c.env.DB.prepare(`
+      INSERT INTO company_websites (company_id, website_url, scraped_at, brand_colors, tone_of_voice, services, contact_info, tagline, logo_url, social_links, scrape_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed')
+      ON CONFLICT(company_id) DO UPDATE SET
+        website_url   = COALESCE(excluded.website_url,   website_url),
+        scraped_at    = excluded.scraped_at,
+        brand_colors  = COALESCE(excluded.brand_colors,  brand_colors),
+        tone_of_voice = COALESCE(excluded.tone_of_voice, tone_of_voice),
+        services      = COALESCE(excluded.services,      services),
+        contact_info  = excluded.contact_info,
+        tagline       = COALESCE(excluded.tagline,       tagline),
+        logo_url      = COALESCE(excluded.logo_url,      logo_url),
+        social_links  = COALESCE(excluded.social_links,  social_links),
+        scrape_status = 'completed'
+    `).bind(
+      user.company_id,
+      website_url || '',
+      now,
+      brand_colors  ? JSON.stringify(brand_colors)  : null,
+      tone_of_voice || null,
+      services      ? JSON.stringify(services)      : null,
+      contactInfo,
+      tagline     || null,
+      logo_url    || null,
+      social_links  ? JSON.stringify(social_links)  : null
+    ).run()
+
+    // Reset KV TTL on manual save (treat as fresh scan)
+    if (c.env?.KV) {
+      await c.env.KV.put(`scraper:next_scan:${user.company_id}`, now, { expirationTtl: 60 * 60 * 24 * 30 })
+    }
+
+    return c.json({ success: true, saved_at: now })
+  } catch (err: any) {
+    return c.json({ error: 'Save failed', detail: err?.message }, 500)
   }
 })
 
