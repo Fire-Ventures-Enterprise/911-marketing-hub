@@ -1248,7 +1248,7 @@ async function uploadTemplateImage() {
   fd.append('niche', niche);
   fd.append('alt_text', altText);
   try {
-    const r = await fetch('/api/images/upload', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` }, body: fd });
+    const r = await fetch('/api/images/upload', { method: 'POST', headers: { Authorization: `Bearer ${getStoredToken()}` }, body: fd });
     const d = await r.json();
     if (!r.ok) { statusEl.textContent = '✗ ' + (d.error || 'Upload failed'); toast(d.error || 'Upload failed', 'error'); return; }
     statusEl.textContent = `✓ Saved to R2: ${d.r2Key}`;
@@ -1273,7 +1273,7 @@ async function uploadDomainImage() {
   fd.append('image_type', imgType);
   fd.append('alt_text', altText);
   try {
-    const r = await fetch('/api/images/upload', { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` }, body: fd });
+    const r = await fetch('/api/images/upload', { method: 'POST', headers: { Authorization: `Bearer ${getStoredToken()}` }, body: fd });
     const d = await r.json();
     if (!r.ok) { statusEl.textContent = '✗ ' + (d.error || 'Upload failed'); toast(d.error || 'Upload failed', 'error'); return; }
     statusEl.textContent = `✓ Saved to R2: ${d.r2Key}`;
@@ -1291,7 +1291,7 @@ async function loadTemplates() {
   // We use the sync-status API as a proxy; templates come from lp_templates
   try {
     // Fetch template data via a dedicated query using existing auth
-    const r = await fetch('/api/lp-templates', { headers: { Authorization: `Bearer ${getToken()}` } });
+    const r = await fetch('/api/lp-templates', { headers: { Authorization: `Bearer ${getStoredToken()}` } });
     if (!r.ok) { grid.innerHTML = '<div style="color:var(--txt3);font-size:13px">Template data via /api/lp-templates — endpoint not yet exposed (add if needed)</div>'; return; }
     const d = await r.json();
     grid.innerHTML = (d.templates || []).map(t => `
@@ -1319,7 +1319,7 @@ async function loadImageLibrary() {
   const wrap = document.getElementById('img-library-wrap');
   if (!wrap) return;
   try {
-    const r = await fetch('/api/images/list', { headers: { Authorization: `Bearer ${getToken()}` } });
+    const r = await fetch('/api/images/list', { headers: { Authorization: `Bearer ${getStoredToken()}` } });
     const d = await r.json();
     if (!d.images?.length) { wrap.innerHTML = '<div style="color:var(--txt3);font-size:13px">No images uploaded yet.</div>'; return; }
     wrap.innerHTML = `<div class="img-preview-wrap">${d.images.map(img => `
@@ -1339,14 +1339,46 @@ async function loadImageLibrary() {
 async function approveImage(id, btn) {
   btn.disabled = true; btn.textContent = '…';
   try {
-    const r = await fetch(`/api/images/${id}/approve`, { method: 'PATCH', headers: { Authorization: `Bearer ${getToken()}` } });
+    const r = await fetch(`/api/images/${id}/approve`, { method: 'PATCH', headers: { Authorization: `Bearer ${getStoredToken()}` } });
     if (r.ok) { toast('Image approved'); loadImageLibrary(); }
     else { toast('Approve failed', 'error'); btn.disabled = false; btn.textContent = 'Approve'; }
   } catch { toast('Network error', 'error'); btn.disabled = false; btn.textContent = 'Approve'; }
 }
 
-function loadTplImagePreview() {
-  // Could fetch existing images for selected template — placeholder for future enhancement
+async function loadTplImagePreview() {
+  const tplNum  = document.getElementById('img-tpl-id')?.value;
+  const prevDiv = document.getElementById('tpl-upload-preview');
+  const prevImg = document.getElementById('tpl-preview-img');
+  const prevName= document.getElementById('tpl-preview-name');
+  if (!prevDiv) return;
+  if (!tplNum) { prevDiv.style.display = 'none'; return; }
+
+  prevDiv.style.display = 'block';
+  if (prevImg)  { prevImg.src = ''; prevImg.style.display = ''; prevImg.alt = 'Loading…'; }
+  if (prevName) prevName.textContent = 'Loading existing images for this template…';
+
+  try {
+    const r = await fetch(`/api/images/list?template_id=${tplNum}`, {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    const images = d.images || [];
+    if (!images.length) {
+      if (prevImg)  prevImg.style.display = 'none';
+      if (prevName) prevName.textContent = `No images uploaded yet for T${String(tplNum).padStart(2,'0')} — upload one above.`;
+      return;
+    }
+    const first = images[0];
+    if (prevImg)  {
+      prevImg.style.display = '';
+      prevImg.src = first.url;
+      prevImg.alt = first.alt_text || `Template ${tplNum} hero`;
+    }
+    if (prevName) prevName.textContent = `${images.length} image${images.length !== 1 ? 's' : ''} uploaded — ${first.r2_key}`;
+  } catch {
+    if (prevImg)  prevImg.style.display = 'none';
+    if (prevName) prevName.textContent = 'Could not load template images.';
+  }
 }
 
 // Populate domain dropdown for image upload when images pane is shown
@@ -2921,7 +2953,7 @@ async function searchProspects() {
   const bizType = document.getElementById('prosp-biz-type')?.value || '';
   const minRev  = parseInt(document.getElementById('prosp-min-reviews')?.value || '0');
 
-  if (!niche || !city) { showToast('Niche and city are required', true); return; }
+  if (!niche || !city) { toast('Niche and city are required', true); return; }
 
   const btn     = document.getElementById('prosp-search-btn');
   const msgEl   = document.getElementById('prosp-search-msg');
@@ -3036,10 +3068,10 @@ async function saveAsProspect(idx) {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Save failed');
-    showToast('✅ Saved to Prospects Pipeline!');
+    toast('✅ Saved to Prospects Pipeline!');
     loadProspectPipeline();
   } catch (e) {
-    showToast('Save failed: ' + e.message, true);
+    toast('Save failed: ' + e.message, true);
   }
 }
 
@@ -3054,9 +3086,9 @@ async function saveAsCompetitor(idx) {
     });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'Save failed');
-    showToast('✅ Added to Competitor Intel!');
+    toast('✅ Added to Competitor Intel!');
   } catch (e) {
-    showToast('Save failed: ' + e.message, true);
+    toast('Save failed: ' + e.message, true);
   }
 }
 
@@ -3161,9 +3193,9 @@ async function updateProspectStatus(id, status) {
       body: JSON.stringify({ status })
     });
     if (!r.ok) throw new Error('Update failed');
-    showToast('Status updated');
+    toast('Status updated');
   } catch (e) {
-    showToast('Status update failed: ' + e.message, true);
+    toast('Status update failed: ' + e.message, true);
   }
 }
 
@@ -3175,10 +3207,10 @@ async function deleteProspect(id) {
       headers: { Authorization: `Bearer ${getStoredToken()}` }
     });
     if (!r.ok) throw new Error('Delete failed');
-    showToast('Prospect removed');
+    toast('Prospect removed');
     loadProspectPipeline();
   } catch (e) {
-    showToast('Delete failed: ' + e.message, true);
+    toast('Delete failed: ' + e.message, true);
   }
 }
 
@@ -3198,13 +3230,13 @@ async function exportProspects() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   } catch (e) {
-    showToast('Export failed: ' + e.message, true);
+    toast('Export failed: ' + e.message, true);
   }
 }
 
 function _copyToClipboard(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => showToast('Copied!')).catch(() => _copyFallback(text));
+    navigator.clipboard.writeText(text).then(() => toast('Copied!')).catch(() => _copyFallback(text));
   } else {
     _copyFallback(text);
   }
@@ -3218,6 +3250,6 @@ function _copyFallback(text) {
   document.body.appendChild(ta);
   ta.focus();
   ta.select();
-  try { document.execCommand('copy'); showToast('Copied!'); } catch { showToast('Copy failed', true); }
+  try { document.execCommand('copy'); toast('Copied!'); } catch { toast('Copy failed', true); }
   document.body.removeChild(ta);
 }
