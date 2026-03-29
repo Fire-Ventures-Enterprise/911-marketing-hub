@@ -739,6 +739,32 @@
     .scraper-msg.success { background: rgba(74,222,128,.08); border: 1px solid rgba(74,222,128,.3); color: #4ade80; }
     .scraper-msg.error   { background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.3); color: #f87171; }
     .scraper-msg.info    { background: rgba(96,165,250,.08); border: 1px solid rgba(96,165,250,.3); color: #60a5fa; }
+
+    /* ── COMPETITOR INTEL ── */
+    .budget-bar-wrap { background: var(--bg-in); border-radius: 8px; border: 1px solid var(--bd); padding: 14px 16px; }
+    .budget-bar-label { font-size: 12px; color: var(--tx3); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px; }
+    .budget-bar { height: 10px; background: var(--bd); border-radius: 5px; overflow: hidden; margin-bottom: 6px; }
+    .budget-bar-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; background: #4ade80; }
+    .budget-bar-fill.warn   { background: #F59E0B; }
+    .budget-bar-fill.danger { background: #f87171; }
+    .budget-warn-msg { font-size: 12px; color: #F59E0B; margin-top: 4px; }
+    .competitor-row { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 8px; background: var(--bg-in); border: 1px solid var(--bd); margin-bottom: 8px; flex-wrap: wrap; }
+    .competitor-row:hover { border-color: var(--bd2); }
+    .competitor-meta { flex: 1; min-width: 0; }
+    .competitor-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .competitor-domain { font-size: 12px; color: var(--tx3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .competitor-scan-badge { font-size: 11px; padding: 3px 8px; border-radius: 10px; white-space: nowrap; }
+    .scan-badge-done     { background: rgba(74,222,128,.1);  color: #4ade80; border: 1px solid rgba(74,222,128,.3); }
+    .scan-badge-pending  { background: rgba(148,163,184,.1); color: #94a3b8; border: 1px solid rgba(148,163,184,.3); }
+    .scan-badge-scanning { background: rgba(96,165,250,.1);  color: #60a5fa; border: 1px solid rgba(96,165,250,.3); }
+    .intel-result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 10px; }
+    .intel-result-item { background: var(--bg-in); border: 1px solid var(--bd); border-radius: 8px; padding: 12px; }
+    .intel-result-kw { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--tx3); margin-bottom: 8px; }
+    .intel-badge { display: inline-block; font-size: 11px; padding: 2px 7px; border-radius: 8px; margin-right: 4px; margin-bottom: 4px; }
+    .intel-badge-ppc     { background: rgba(248,113,113,.12); color: #f87171; border: 1px solid rgba(248,113,113,.3); }
+    .intel-badge-lsa     { background: rgba(251,191,36,.12);  color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
+    .intel-badge-organic { background: rgba(74,222,128,.12);  color: #4ade80; border: 1px solid rgba(74,222,128,.3); }
+    .intel-badge-none    { background: rgba(148,163,184,.1);  color: #94a3b8; border: 1px solid rgba(148,163,184,.25); }
   </style>
 </head>
 <body>
@@ -832,6 +858,9 @@
       <div class="sb-group">CRM</div>
       <button class="nav-item" data-section="leads" onclick="showSection('leads')">
         <span class="nav-icon">📋</span><span>Leads</span>
+      </button>
+      <button class="nav-item" data-section="intel" onclick="showSection('intel')">
+        <span class="nav-icon">🕵️</span><span>Intel</span>
       </button>
 
       <div class="sb-group super-nav" style="display:none">Admin</div>
@@ -1782,6 +1811,81 @@
           <div class="btn-row" style="margin-top:8px">
             <button class="btn btn-primary" onclick="saveBrandProfile()">💾 Save Brand Profile</button>
             <button class="btn btn-sec" onclick="confirmBrandProfile()">✅ Looks Good — Start Generating</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPETITOR INTELLIGENCE -->
+      <div class="pane" id="pane-intel">
+        <div class="ph"><h2>🕵️ Competitor Intelligence</h2><p>Monitor competitor PPC &amp; LSA activity with SerpAPI keyword scanning. Free plan: 250 searches/month.</p></div>
+
+        <!-- Budget Meter -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">SerpAPI Budget</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="loadBudgetMeter()">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="intel-budget-wrap">
+            <p style="color:var(--tx3);font-size:13px">Loading budget…</p>
+          </div>
+        </div>
+
+        <!-- Add Competitor -->
+        <div class="card">
+          <div class="card-hd"><div class="card-title">Add Competitor</div></div>
+          <div id="intel-add-result" style="display:none;margin-bottom:12px"></div>
+          <div class="co-form-grid">
+            <div class="ff">
+              <label>Competitor Name *</label>
+              <input type="text" id="intel-comp-name" placeholder="e.g. ACME Plumbing" autocomplete="off">
+            </div>
+            <div class="ff">
+              <label>Website URL *</label>
+              <input type="url" id="intel-comp-url" placeholder="https://acmeplumbing.ca" autocomplete="off">
+            </div>
+            <div class="ff">
+              <label>City / Territory</label>
+              <input type="text" id="intel-comp-city" placeholder="e.g. Ottawa" autocomplete="off">
+            </div>
+            <div class="ff">
+              <label>Niche</label>
+              <input type="text" id="intel-comp-niche" placeholder="e.g. plumbing" autocomplete="off">
+            </div>
+            <div class="ff ff-full">
+              <label>Keywords to Monitor <span style="color:var(--tx3);font-weight:400">(one per line)</span></label>
+              <textarea id="intel-comp-keywords" rows="3" placeholder="plumber ottawa&#10;emergency plumbing&#10;drain cleaning ottawa"></textarea>
+            </div>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-primary" id="intel-add-btn" onclick="addCompetitor()">➕ Add Competitor</button>
+          </div>
+        </div>
+
+        <!-- Competitor List -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">Tracked Competitors</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="loadIntelCompetitors()">↻ Refresh</button>
+            </div>
+          </div>
+          <div id="intel-competitors-list">
+            <p style="color:var(--tx3);font-size:13px">Loading competitors…</p>
+          </div>
+        </div>
+
+        <!-- Scan Results Panel -->
+        <div class="card" id="intel-results-panel" style="display:none">
+          <div class="card-hd">
+            <div class="card-title" id="intel-results-title">Scan Results</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="closeIntelResults()">✕ Close</button>
+            </div>
+          </div>
+          <div id="intel-results-body">
+            <p style="color:var(--tx3);font-size:13px">No results loaded.</p>
           </div>
         </div>
       </div>

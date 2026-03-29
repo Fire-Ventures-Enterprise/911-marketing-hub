@@ -29,7 +29,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`, `company_websites`, `data_permissions`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`, `company_websites`, `data_permissions`, `competitors`, `competitor_intel`, `competitor_scans`
 
 ### R2 Bucket
 - **Name:** `slm-hub-images`
@@ -83,6 +83,7 @@ npx wrangler d1 execute 911-marketing-hub-production --file=migrations/<file>.sq
 | `migrations/0009_template_column.sql` | Adds `template INTEGER DEFAULT NULL` to `domains` table + `idx_domains_template` index — already applied to production on 2026-03-28 |
 | `migrations/0010_tenant_system.sql` | Documents `tenants`, `tenant_invitations`, `subscription_plans` tables — already applied directly on production (2026-03-29); safe to run on fresh DB with CREATE TABLE IF NOT EXISTS |
 | `migrations/0011_scraper_permission.sql` | Documents `company_websites`, `data_permissions` tables + 4 indexes — already applied directly on production (2026-03-29); safe to run on fresh DB |
+| `migrations/0012_competitor_intel.sql` | ALTER TABLE competitors ADD COLUMN (serp_keywords, scan_status, notes); CREATE TABLE competitor_scans; 5 indexes — applied on production (2026-03-29) |
 
 ---
 
@@ -286,6 +287,15 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **Permission management in Settings**: Data & Privacy card in `pane-settings` (hidden for non-company_admin); shows permission status, revoke button, re-authorize link, GDPR download; `loadDataPrivacy()` called when Settings tab is opened
 - **GDPR data export**: `GET /api/permissions/download` returns JSON with user profile, company info, data_permissions record, brand profile, lead count; downloaded as `slm-hub-data-export.json` via blob URL trick
 - **`scrape_status = 'completed'` on manual save**: `PATCH /api/scraper/brand-profile` sets `scrape_status='completed'` — satisfies generation check even without auto-scan; manual entry is the fallback path for sites that don't scrape well
+- **SerpAPI competitor intelligence built (2026-03-29)**: `SERPAPI_KEY` CF Pages secret set; `competitors`, `competitor_intel` tables were pre-existing; `competitor_scans` table + new columns (`serp_keywords`, `scan_status`, `notes`) added via migration 0012
+- **SerpAPI existing table schema mismatch**: `competitors` table had `competitor_name` (not `name`), `website_url` (not `domain`), `territory` (not `city`), `status` (not `scan_status`), `added_at` (not `created_at`) — always query `sqlite_master` before writing queries against pre-existing tables; never assume column names
+- **Migration 0012 first attempt failed**: CREATE TABLE IF NOT EXISTS on existing `competitors` skipped table creation but then `CREATE INDEX ON competitors(scan_status)` failed because the column didn't exist yet — fix: use ALTER TABLE to add missing columns first, then create indexes
+- **SerpAPI budget management**: `SERP_WARN_THRESHOLD=200`, `SERP_HARD_LIMIT=250`; scan endpoint returns 429 with `code:'BUDGET_EXCEEDED'` at 250+; returns 429 with `code:'LOW_CREDITS'` when `plan_searches_left < 10`; `force:true` in request body bypasses both checks for admin override
+- **SerpAPI KV cache**: key `serp:{competitor_id}:{keyword_slug}:{YYYY-MM-DD}`, TTL 14 days (1,209,600 seconds); monthly usage counter in `serp-usage:{YYYY-MM}`; account credit cache in `serp-account-cache` (1-hour TTL); cache is ALWAYS checked before calling SerpAPI — never double-bill
+- **SerpAPI endpoints used**: `https://serpapi.com/search.json?engine=google` for PPC/LSA detection; `https://serpapi.com/account.json` for credit check (cached 1h); `engine=google_maps` available for competitor verification
+- **`normDomain()` helper**: strips protocol, `www.`, and path from URL for domain matching in SerpAPI results
+- **`findDomainInResults()` helper**: checks if competitor domain appears in SerpAPI ads or organic results; returns 1-based position or null
+- **Intel pane**: `pane-intel` with budget meter, Add Competitor form, competitor list (with Scan + Results buttons), Scan Results panel; `'intel'` added to `generatorSections` so staff can't see it; `SECTION_LABELS` entry added; `_esc()` HTML escape helper added for safe rendering of competitor names/domains
 
 ---
 
@@ -308,6 +318,26 @@ SLM Hub is a white-label multi-tenant SaaS platform. Three-tier role hierarchy:
 **Plan limits:** Never hardcode. Read `max_domains` and `max_users` from `tenants` table. Read plan features from `subscription_plans` table.
 
 **Invitation tokens:** 32-byte hex (64 chars), single-use, 7-day expiry. Invalidated on acceptance.
+
+---
+
+## SERPAPI BUDGET DOCTRINE
+
+SerpAPI free plan: **250 searches/month**. Every search costs 1 credit. This budget must be protected at all times.
+
+**Hard limit:** 250 searches/month tracked in KV (`serp-usage:{YYYY-MM}`). When usage ≥ 250, all scan requests return `429 BUDGET_EXCEEDED` unless `force: true` is passed.
+
+**Warning threshold:** At 200 searches, every scan response includes `budget_warning` string and the UI budget bar turns amber.
+
+**Low credits check:** Before each scan, `GET /api/intel/budget` checks live SerpAPI account credits (cached 1h in KV). If `plan_searches_left < 10`, returns `429 LOW_CREDITS`.
+
+**Admin override:** `{ force: true }` in POST body bypasses both the monthly cap and the low-credits block. Only use for critical one-off scans.
+
+**Cache before call:** KV cache key `serp:{competitor_id}:{keyword_slug}:{YYYY-MM-DD}` with 14-day TTL. If a cached result exists for today, it is returned immediately — no SerpAPI call, no credit spent. `force: true` bypasses cache as well.
+
+**Scan cadence:** Scan every 14 days per competitor, not 7. Do not add cron jobs that scan all competitors automatically — this eats the budget. All scans are manual (user-initiated) unless explicitly scheduled by the super_admin.
+
+**SERPAPI_KEY secret:** Set via `echo "KEY" | npx wrangler pages secret put SERPAPI_KEY --project-name services-leads-marketing-hub` — then redeploy. Key type: `SERPAPI_KEY: string` in `Bindings`.
 
 ---
 

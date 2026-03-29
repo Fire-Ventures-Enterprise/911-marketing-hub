@@ -15,6 +15,7 @@ type Bindings = {
   GOOGLE_ADS_CLIENT_SECRET: string
   GOOGLE_PLACES_API_KEY: string
   ANTHROPIC_API_KEY: string
+  SERPAPI_KEY: string
 }
 // Real review row from google_reviews D1 table
 type ReviewRow = {
@@ -3010,6 +3011,360 @@ app.patch('/api/images/:id/approve', async (c) => {
     return c.json({ success: true })
   } catch (err: any) {
     return c.json({ error: 'Approve failed', detail: err?.message }, 500)
+  }
+})
+
+// ── SERPAPI COMPETITOR INTELLIGENCE ──────────────────────────────────────
+// Free plan: 250 searches/month
+// Budget thresholds: warn at 200, hard-stop at 250
+// Cache TTL: 14 days (KV key: serp:{competitor_id}:{kw_slug}:{YYYY-MM-DD})
+// Usage tracking: KV key serp-usage:{YYYY-MM} — incremented per successful call
+
+const SERP_WARN_THRESHOLD = 200
+const SERP_HARD_LIMIT     = 250
+const SERP_BASE           = 'https://serpapi.com'
+
+async function serpFetch(env: Bindings, params: Record<string, string>): Promise<any> {
+  const url = new URL(`${SERP_BASE}/search.json`)
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
+  url.searchParams.set('api_key', env.SERPAPI_KEY || '')
+  const res = await fetch(url.toString())
+  if (!res.ok) {
+    const txt = await res.text()
+    throw new Error(`SerpAPI ${res.status}: ${txt.slice(0, 200)}`)
+  }
+  return res.json()
+}
+
+async function getSerpUsage(env: Bindings): Promise<number> {
+  if (!env.KV) return 0
+  const key = `serp-usage:${new Date().toISOString().slice(0, 7)}`
+  const val = await env.KV.get(key)
+  return val ? parseInt(val, 10) : 0
+}
+
+async function incrementSerpUsage(env: Bindings): Promise<number> {
+  if (!env.KV) return 0
+  const key  = `serp-usage:${new Date().toISOString().slice(0, 7)}`
+  const next = (await getSerpUsage(env)) + 1
+  await env.KV.put(key, String(next), { expirationTtl: 60 * 60 * 24 * 35 }) // 35-day TTL covers full month
+  return next
+}
+
+async function getSerpAccountCached(env: Bindings): Promise<{ plan_searches_left: number; total_searches_done: number } | null> {
+  if (!env.SERPAPI_KEY || !env.KV) return null
+  const cacheKey = `serp-account-cache`
+  const cached   = await env.KV.get(cacheKey)
+  if (cached) return JSON.parse(cached)
+  try {
+    const res  = await fetch(`${SERP_BASE}/account.json?api_key=${env.SERPAPI_KEY}`)
+    if (!res.ok) return null
+    const data = await res.json() as any
+    const result = { plan_searches_left: data.plan_searches_left ?? 250, total_searches_done: data.total_searches_done ?? 0 }
+    await env.KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 3600 }) // 1-hour cache
+    return result
+  } catch { return null }
+}
+
+function normDomain(d: string): string {
+  return (d || '').replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0].toLowerCase().trim()
+}
+
+function findDomainInResults(results: any[], competitorDomain: string): number | null {
+  if (!competitorDomain) return null
+  const cd = normDomain(competitorDomain)
+  for (let i = 0; i < results.length; i++) {
+    const r   = results[i]
+    const link = normDomain(r.link || r.displayed_link || r.domain || '')
+    if (link && (link === cd || link.endsWith('.' + cd) || link.includes(cd))) return i + 1
+  }
+  return null
+}
+
+async function runGoogleSearch(env: Bindings, keyword: string, city: string): Promise<{
+  ads: any[]; localServiceAds: any[]; organicResults: any[]
+}> {
+  const data = await serpFetch(env, {
+    engine: 'google', q: `${keyword} ${city}`,
+    gl: 'ca', hl: 'en', location: 'Ottawa,Ontario,Canada', num: '10'
+  })
+  return {
+    ads:              data.ads                || [],
+    localServiceAds:  data.local_service_ads  || [],
+    organicResults:   data.organic_results    || []
+  }
+}
+
+// ── SERPAPI ENDPOINTS ─────────────────────────────────────────────────────
+
+// GET /api/intel/budget — monthly usage + SerpAPI account credits
+app.get('/api/intel/budget', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  const usage   = await getSerpUsage(c.env)
+  const account = await getSerpAccountCached(c.env)
+  const pct     = Math.min(100, Math.round((usage / SERP_HARD_LIMIT) * 100))
+  return c.json({
+    usage,
+    limit:              SERP_HARD_LIMIT,
+    warn_threshold:     SERP_WARN_THRESHOLD,
+    percent:            pct,
+    paused:             usage >= SERP_HARD_LIMIT,
+    warning:            usage >= SERP_WARN_THRESHOLD && usage < SERP_HARD_LIMIT,
+    month:              new Date().toISOString().slice(0, 7),
+    plan_searches_left: account?.plan_searches_left ?? null,
+    total_done:         account?.total_searches_done ?? null
+  })
+})
+
+// GET /api/intel/competitors — list competitors
+app.get('/api/intel/competitors', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ competitors: [] })
+  try {
+    let rows: any[]
+    if (user.role === 'super_admin') {
+      const res = await c.env.DB.prepare(
+        'SELECT c.*, (SELECT COUNT(*) FROM competitor_scans cs WHERE cs.competitor_id = c.id) as scan_count FROM competitors c ORDER BY c.added_at DESC LIMIT 100'
+      ).all()
+      rows = res.results as any[]
+    } else {
+      const res = await c.env.DB.prepare(
+        'SELECT c.*, (SELECT COUNT(*) FROM competitor_scans cs WHERE cs.competitor_id = c.id) as scan_count FROM competitors c WHERE c.company_id = ? ORDER BY c.added_at DESC LIMIT 100'
+      ).bind(user.company_id).all()
+      rows = res.results as any[]
+    }
+    return c.json({ competitors: rows.map(r => ({ ...r, serp_keywords: JSON.parse(r.serp_keywords || '[]') })) })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load competitors', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/intel/competitors — add a competitor to monitor
+app.post('/api/intel/competitors', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  const { competitor_name, website_url, territory = 'Ottawa', niche = '', serp_keywords = [], notes = '' } = await c.req.json()
+  if (!competitor_name) return c.json({ error: 'competitor_name required' }, 400)
+  const companyId = user.role === 'super_admin' ? (await c.req.json().catch(() => ({}))).company_id ?? null : user.company_id
+  const now = new Date().toISOString()
+  try {
+    const result = await c.env.DB.prepare(
+      `INSERT INTO competitors (company_id, competitor_name, website_url, territory, niche, status, serp_keywords, notes, added_by, added_at, scan_status)
+       VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, 'pending')`
+    ).bind(companyId, competitor_name, website_url || null, territory, niche, JSON.stringify(serp_keywords), notes || null, user.email, now).run()
+    return c.json({ success: true, id: result.meta.last_row_id })
+  } catch (err: any) {
+    return c.json({ error: 'Insert failed', detail: err?.message }, 500)
+  }
+})
+
+// PATCH /api/intel/competitors/:id — update keywords, name, territory etc.
+app.patch('/api/intel/competitors/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  const id = Number(c.req.param('id'))
+  // Verify ownership for company_admin
+  if (user.role === 'company_admin') {
+    const row = await c.env.DB.prepare('SELECT company_id FROM competitors WHERE id = ?').bind(id).first() as any
+    if (!row || row.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+  }
+  const { competitor_name, website_url, territory, niche, serp_keywords, notes } = await c.req.json()
+  try {
+    await c.env.DB.prepare(
+      `UPDATE competitors SET
+        competitor_name = COALESCE(?, competitor_name),
+        website_url     = COALESCE(?, website_url),
+        territory       = COALESCE(?, territory),
+        niche           = COALESCE(?, niche),
+        serp_keywords   = COALESCE(?, serp_keywords),
+        notes           = COALESCE(?, notes)
+       WHERE id = ?`
+    ).bind(
+      competitor_name ?? null, website_url ?? null, territory ?? null,
+      niche ?? null, serp_keywords ? JSON.stringify(serp_keywords) : null, notes ?? null, id
+    ).run()
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: 'Update failed', detail: err?.message }, 500)
+  }
+})
+
+// DELETE /api/intel/competitors/:id — remove competitor + all scan data
+app.delete('/api/intel/competitors/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 503)
+  const id = Number(c.req.param('id'))
+  if (user.role === 'company_admin') {
+    const row = await c.env.DB.prepare('SELECT company_id FROM competitors WHERE id = ?').bind(id).first() as any
+    if (!row || row.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+  }
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare('DELETE FROM competitor_scans WHERE competitor_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM competitor_intel WHERE competitor_id = ?').bind(id),
+      c.env.DB.prepare('DELETE FROM competitors WHERE id = ?').bind(id)
+    ])
+    return c.json({ success: true })
+  } catch (err: any) {
+    return c.json({ error: 'Delete failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/intel/scan — budget-aware SerpAPI keyword scan for a competitor
+app.post('/api/intel/scan', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB || !c.env?.KV) return c.json({ error: 'DB/KV unavailable' }, 503)
+  if (!c.env?.SERPAPI_KEY) return c.json({ error: 'SERPAPI_KEY not configured' }, 503)
+
+  const { competitor_id, keyword, city = 'Ottawa', force = false } = await c.req.json()
+  if (!competitor_id || !keyword) return c.json({ error: 'competitor_id and keyword required' }, 400)
+
+  // Verify competitor exists + ownership
+  const comp = await c.env.DB.prepare('SELECT * FROM competitors WHERE id = ?').bind(competitor_id).first() as any
+  if (!comp) return c.json({ error: 'Competitor not found' }, 404)
+  if (user.role === 'company_admin' && comp.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+
+  // ── Budget gate ────────────────────────────────────────────────────────
+  const usage = await getSerpUsage(c.env)
+  if (usage >= SERP_HARD_LIMIT && !force) {
+    return c.json({
+      error: `Monthly SerpAPI limit reached (${SERP_HARD_LIMIT}/${SERP_HARD_LIMIT}). Auto-scans paused until next month.`,
+      code: 'BUDGET_EXCEEDED', usage, limit: SERP_HARD_LIMIT
+    }, 429)
+  }
+  // Check live SerpAPI credits (< 10 remaining = block)
+  const account = await getSerpAccountCached(c.env)
+  if (account && account.plan_searches_left < 10 && !force) {
+    return c.json({
+      error: `Only ${account.plan_searches_left} SerpAPI searches remaining — scans paused`,
+      code: 'LOW_CREDITS', plan_searches_left: account.plan_searches_left
+    }, 429)
+  }
+
+  // ── KV cache check (skip if force) ────────────────────────────────────
+  const today    = new Date().toISOString().slice(0, 10)
+  const kwSlug   = keyword.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')
+  const cacheKey = `serp:${competitor_id}:${kwSlug}:${today}`
+  if (!force) {
+    const cached = await c.env.KV.get(cacheKey)
+    if (cached) {
+      return c.json({ ...JSON.parse(cached), cached: true, budget_usage: usage })
+    }
+  }
+
+  // ── Call SerpAPI ───────────────────────────────────────────────────────
+  let searchData: { ads: any[]; localServiceAds: any[]; organicResults: any[] }
+  try {
+    searchData = await runGoogleSearch(c.env, keyword, city)
+  } catch (err: any) {
+    return c.json({ error: `SerpAPI call failed: ${err?.message}`, code: 'SERP_ERROR' }, 502)
+  }
+
+  // Increment usage counter
+  const newUsage = await incrementSerpUsage(c.env)
+
+  const { ads, localServiceAds, organicResults } = searchData
+  const competitorDomain = comp.website_url || ''
+
+  // Extract advertiser names for display
+  const ppcAdvertisers = ads.map((a: any) =>
+    normDomain(a.displayed_link || a.link || '') || a.title?.slice(0, 40) || 'Unknown'
+  ).filter(Boolean)
+  const lsaAdvertisers = localServiceAds.map((a: any) =>
+    a.title || a.provider_name || 'Unknown'
+  )
+  const organicTop5 = organicResults.slice(0, 5).map((r: any) => ({
+    position: r.position,
+    title:    (r.title    || '').slice(0, 80),
+    domain:   normDomain(r.link || r.displayed_link || ''),
+    snippet:  (r.snippet  || '').slice(0, 120)
+  }))
+
+  // Check if THIS competitor appears in results
+  const competitorPpcPos     = findDomainInResults(ads,            competitorDomain)
+  const competitorOrganicPos = findDomainInResults(organicResults, competitorDomain)
+
+  const now    = new Date().toISOString()
+  const result = {
+    success:               true,
+    competitor_id,
+    keyword,
+    city,
+    scanned_at:            now,
+    has_ppc:               ads.length > 0,
+    has_lsa:               localServiceAds.length > 0,
+    ppc_count:             ads.length,
+    lsa_count:             localServiceAds.length,
+    ppc_advertisers:       ppcAdvertisers,
+    lsa_advertisers:       lsaAdvertisers,
+    organic_top5:          organicTop5,
+    competitor_ppc_pos:    competitorPpcPos,
+    competitor_organic_pos:competitorOrganicPos,
+    budget_usage:          newUsage,
+    budget_warning:        newUsage >= SERP_WARN_THRESHOLD ? `⚠️ ${newUsage}/${SERP_HARD_LIMIT} SerpAPI searches used this month` : null
+  }
+
+  // ── Save to D1 competitor_scans ────────────────────────────────────────
+  try {
+    await c.env.DB.prepare(
+      `INSERT INTO competitor_scans
+        (competitor_id, keyword, scanned_at, has_ppc, has_lsa, ppc_count, lsa_count,
+         ppc_advertisers, lsa_advertisers, organic_top5, competitor_ppc_pos, competitor_organic_pos)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      competitor_id, keyword, now,
+      ads.length > 0 ? 1 : 0, localServiceAds.length > 0 ? 1 : 0,
+      ads.length, localServiceAds.length,
+      JSON.stringify(ppcAdvertisers), JSON.stringify(lsaAdvertisers),
+      JSON.stringify(organicTop5),
+      competitorPpcPos ?? null, competitorOrganicPos ?? null
+    ).run()
+    await c.env.DB.prepare('UPDATE competitors SET last_scanned = ?, scan_status = ? WHERE id = ?')
+      .bind(now, 'done', competitor_id).run()
+  } catch (_) {}
+
+  // ── Cache in KV (14-day TTL) ───────────────────────────────────────────
+  try {
+    await c.env.KV.put(cacheKey, JSON.stringify(result), { expirationTtl: 60 * 60 * 24 * 14 })
+  } catch (_) {}
+
+  return c.json(result)
+})
+
+// GET /api/intel/results/:id — latest scan result per keyword for one competitor
+app.get('/api/intel/results/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ results: [] })
+  const id = Number(c.req.param('id'))
+  if (user.role === 'company_admin') {
+    const row = await c.env.DB.prepare('SELECT company_id FROM competitors WHERE id = ?').bind(id).first() as any
+    if (!row || row.company_id !== user.company_id) return c.json({ error: 'Forbidden' }, 403)
+  }
+  try {
+    const res = await c.env.DB.prepare(
+      'SELECT * FROM competitor_scans WHERE competitor_id = ? ORDER BY scanned_at DESC LIMIT 60'
+    ).bind(id).all()
+    const rows = (res.results as any[]).map(r => ({
+      ...r,
+      ppc_advertisers:  JSON.parse(r.ppc_advertisers  || '[]'),
+      lsa_advertisers:  JSON.parse(r.lsa_advertisers  || '[]'),
+      organic_top5:     JSON.parse(r.organic_top5     || '[]')
+    }))
+    // Latest per keyword
+    const latestByKw: Record<string, any> = {}
+    for (const row of rows) {
+      if (!latestByKw[row.keyword]) latestByKw[row.keyword] = row
+    }
+    return c.json({ results: rows, latest_by_keyword: Object.values(latestByKw) })
+  } catch (err: any) {
+    return c.json({ error: 'Failed to load results', detail: err?.message }, 500)
   }
 })
 

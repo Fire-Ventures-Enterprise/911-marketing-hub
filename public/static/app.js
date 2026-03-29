@@ -72,7 +72,7 @@ function _applyRoleNav(role) {
   });
 
   // Generator nav items (hidden for staff)
-  const generatorSections = ['domains','landing','ads','seo','keywords','publish','images','reviews'];
+  const generatorSections = ['domains','landing','ads','seo','keywords','publish','images','reviews','intel'];
   document.querySelectorAll('.nav-item').forEach(btn => {
     const sec = btn.dataset.section;
     if (!sec) return;
@@ -129,7 +129,8 @@ const SECTION_LABELS = {
   tenants:       'Tenant Management',
   companies:     'Company Management',
   settings:      'Settings',
-  'brand-profile': 'Brand Profile'
+  'brand-profile': 'Brand Profile',
+  intel:           'Competitor Intelligence'
 };
 
 function showSection(id) {
@@ -153,6 +154,7 @@ function showSection(id) {
   if (id === 'tenants')        { loadTenants(); }
   if (id === 'settings')       { loadTeam(); loadDataPrivacy(); }
   if (id === 'brand-profile')  { loadBrandProfile(); }
+  if (id === 'intel')          { loadIntel(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -2566,4 +2568,322 @@ async function confirmBrandProfile() {
   await saveBrandProfile();
   toast('🎉 Brand profile confirmed — you can now generate content!', 'success');
   showSection('landing');
+}
+
+// ── COMPETITOR INTELLIGENCE ────────────────────────────────────────────────
+
+function _esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadIntel() {
+  await Promise.all([loadBudgetMeter(), loadIntelCompetitors()]);
+}
+
+async function loadBudgetMeter() {
+  const wrap = document.getElementById('intel-budget-wrap');
+  if (!wrap) return;
+  try {
+    const r = await fetch('/api/intel/budget', {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    const usage = d.monthly_usage || 0;
+    const limit = d.limit || 250;
+    const pct = Math.min(100, (usage / limit) * 100).toFixed(1);
+    const fillClass = usage >= 230 ? 'danger' : usage >= 200 ? 'warn' : '';
+    const credits = d.account ? d.account.plan_searches_left : null;
+    const creditLine = credits !== null
+      ? `<span>${credits} SerpAPI plan credits remaining</span>`
+      : '';
+    const warnLine = d.warning
+      ? `<div class="budget-warn-msg">⚠️ ${_esc(d.warning)}</div>`
+      : '';
+    wrap.innerHTML = `
+      <div class="budget-bar-wrap">
+        <div class="budget-bar-label">
+          <span>Monthly Usage: <strong>${usage} / ${limit}</strong> searches used</span>
+          ${creditLine}
+        </div>
+        <div class="budget-bar">
+          <div class="budget-bar-fill ${fillClass}" style="width:${pct}%"></div>
+        </div>
+        ${warnLine}
+      </div>`;
+  } catch (e) {
+    if (wrap) wrap.innerHTML = '<p style="color:var(--tx3);font-size:13px">Could not load budget.</p>';
+  }
+}
+
+async function loadIntelCompetitors() {
+  const listEl = document.getElementById('intel-competitors-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<p style="color:var(--tx3);font-size:13px">Loading…</p>';
+  try {
+    const r = await fetch('/api/intel/competitors', {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    if (!d.competitors || d.competitors.length === 0) {
+      listEl.innerHTML = '<p style="color:var(--tx3);font-size:13px">No competitors tracked yet. Add one above.</p>';
+      return;
+    }
+    listEl.innerHTML = d.competitors.map(c => {
+      const keywords = (() => { try { return JSON.parse(c.serp_keywords || '[]'); } catch { return []; } })();
+      const kwPreview = keywords.length
+        ? keywords.slice(0, 3).join(', ') + (keywords.length > 3 ? ` +${keywords.length - 3} more` : '')
+        : 'No keywords set';
+      const badgeClass = c.scan_status === 'done'
+        ? 'scan-badge-done'
+        : c.scan_status === 'scanning'
+          ? 'scan-badge-scanning'
+          : 'scan-badge-pending';
+      const badgeText = c.scan_status === 'done'
+        ? '✓ Scanned'
+        : c.scan_status === 'scanning'
+          ? '⏳ Scanning…'
+          : '○ Pending';
+      const lastScan = c.last_scanned
+        ? new Date(c.last_scanned).toLocaleDateString()
+        : 'Never';
+      const resultsBtn = c.scan_status === 'done'
+        ? `<button class="btn btn-sec btn-sm" onclick="showCompetitorResults(${c.id})">📊 Results</button>`
+        : '';
+      return `
+        <div class="competitor-row" id="comp-row-${c.id}">
+          <div class="competitor-meta">
+            <div class="competitor-name">${_esc(c.competitor_name)}</div>
+            <div class="competitor-domain">
+              ${_esc(c.website_url || '')}
+              ${c.territory ? '· ' + _esc(c.territory) : ''}
+              · ${_esc(kwPreview)}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap">
+            <span class="competitor-scan-badge ${badgeClass}">${badgeText}</span>
+            <span style="font-size:11px;color:var(--tx3)">Last: ${lastScan}</span>
+            <button class="btn btn-primary btn-sm" id="scan-btn-${c.id}" onclick="scanCompetitor(${c.id})">🔍 Scan</button>
+            ${resultsBtn}
+            <button class="btn btn-sec btn-sm" style="color:#f87171" onclick="deleteCompetitor(${c.id})" title="Delete competitor">🗑</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    if (listEl) listEl.innerHTML = '<p style="color:var(--tx3);font-size:13px">Error loading competitors.</p>';
+  }
+}
+
+async function addCompetitor() {
+  const nameEl    = document.getElementById('intel-comp-name');
+  const urlEl     = document.getElementById('intel-comp-url');
+  const cityEl    = document.getElementById('intel-comp-city');
+  const nicheEl   = document.getElementById('intel-comp-niche');
+  const kwEl      = document.getElementById('intel-comp-keywords');
+  const resultEl  = document.getElementById('intel-add-result');
+  const btn       = document.getElementById('intel-add-btn');
+
+  const name = nameEl?.value.trim();
+  const url  = urlEl?.value.trim();
+  const city = cityEl?.value.trim();
+  const niche = nicheEl?.value.trim();
+  const kwRaw = kwEl?.value.trim();
+
+  if (!name || !url) {
+    if (resultEl) {
+      resultEl.className = 'scraper-msg error';
+      resultEl.textContent = 'Competitor name and website URL are required.';
+      resultEl.style.display = 'block';
+    }
+    return;
+  }
+
+  const keywords = kwRaw ? kwRaw.split('\n').map(k => k.trim()).filter(Boolean) : [];
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+  if (resultEl) resultEl.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/intel/competitors', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getStoredToken()}`
+      },
+      body: JSON.stringify({
+        competitor_name: name,
+        website_url:     url,
+        territory:       city,
+        niche,
+        serp_keywords:   keywords
+      })
+    });
+    const d = await r.json();
+    if (d.id || d.success) {
+      if (resultEl) {
+        resultEl.className = 'scraper-msg success';
+        resultEl.textContent = `✅ ${name} added successfully.`;
+        resultEl.style.display = 'block';
+      }
+      if (nameEl)  nameEl.value  = '';
+      if (urlEl)   urlEl.value   = '';
+      if (cityEl)  cityEl.value  = '';
+      if (nicheEl) nicheEl.value = '';
+      if (kwEl)    kwEl.value    = '';
+      loadIntelCompetitors();
+    } else {
+      if (resultEl) {
+        resultEl.className = 'scraper-msg error';
+        resultEl.textContent = d.error || 'Failed to add competitor.';
+        resultEl.style.display = 'block';
+      }
+    }
+  } catch (e) {
+    if (resultEl) {
+      resultEl.className = 'scraper-msg error';
+      resultEl.textContent = 'Error: ' + (e.message || 'unknown error');
+      resultEl.style.display = 'block';
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '➕ Add Competitor'; }
+  }
+}
+
+async function deleteCompetitor(id) {
+  if (!confirm('Delete this competitor and all their scan history? This cannot be undone.')) return;
+  try {
+    const r = await fetch(`/api/intel/competitors/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    if (d.success) {
+      toast('Competitor deleted', 'success');
+      document.getElementById('intel-results-panel')?.style.setProperty('display', 'none');
+      loadIntelCompetitors();
+    } else {
+      toast(d.error || 'Delete failed', 'error');
+    }
+  } catch (e) {
+    toast('Delete failed: ' + (e.message || 'error'), 'error');
+  }
+}
+
+async function scanCompetitor(id) {
+  const btn = document.getElementById(`scan-btn-${id}`);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Scanning…'; }
+
+  try {
+    const r = await fetch('/api/intel/scan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getStoredToken()}`
+      },
+      body: JSON.stringify({ competitor_id: id })
+    });
+    const d = await r.json();
+
+    if (r.status === 429) {
+      toast('⚠️ ' + (d.error || 'SerpAPI budget limit reached'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Scan'; }
+      return;
+    }
+    if (d.error && !d.scans) {
+      toast(d.error || 'Scan failed', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '🔍 Scan'; }
+      return;
+    }
+
+    const cached = d.cached ? ' (cached)' : '';
+    const budgetNote = d.budget_warning ? ` ⚠️ ${d.budget_warning}` : '';
+    toast(`✅ Scan complete${cached}${budgetNote}`, 'success');
+    await loadBudgetMeter();
+    await loadIntelCompetitors();
+    showCompetitorResults(id);
+  } catch (e) {
+    toast('Scan error: ' + (e.message || 'unknown'), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 Scan'; }
+  }
+}
+
+async function showCompetitorResults(id) {
+  const panel   = document.getElementById('intel-results-panel');
+  const body    = document.getElementById('intel-results-body');
+  const titleEl = document.getElementById('intel-results-title');
+  if (!panel || !body) return;
+
+  body.innerHTML = '<p style="color:var(--tx3);font-size:13px">Loading results…</p>';
+  panel.style.display = '';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  try {
+    const r = await fetch(`/api/intel/results/${id}`, {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+
+    if (titleEl) {
+      titleEl.textContent = `Scan Results — ${d.competitor?.competitor_name || 'Competitor'}`;
+    }
+
+    if (!d.scans || d.scans.length === 0) {
+      body.innerHTML = '<p style="color:var(--tx3);font-size:13px">No scan data yet. Run a scan first.</p>';
+      return;
+    }
+
+    // Latest scan per keyword
+    const byKw = {};
+    d.scans.forEach(s => {
+      if (!byKw[s.keyword] || s.scanned_at > byKw[s.keyword].scanned_at) byKw[s.keyword] = s;
+    });
+
+    const cards = Object.values(byKw).map(s => {
+      const ppcAdv = (() => { try { return JSON.parse(s.ppc_advertisers || '[]'); } catch { return []; } })();
+      const lsaAdv = (() => { try { return JSON.parse(s.lsa_advertisers || '[]'); } catch { return []; } })();
+      const organic = (() => { try { return JSON.parse(s.organic_top5 || '[]'); } catch { return []; } })();
+
+      const ppcBadge = s.has_ppc
+        ? `<span class="intel-badge intel-badge-ppc">PPC ×${s.ppc_count}</span>`
+        : '';
+      const lsaBadge = s.has_lsa
+        ? `<span class="intel-badge intel-badge-lsa">LSA ×${s.lsa_count}</span>`
+        : '';
+      const noBadge = !s.has_ppc && !s.has_lsa
+        ? '<span class="intel-badge intel-badge-none">No Ads</span>'
+        : '';
+      const ppcPosBadge = s.competitor_ppc_pos
+        ? `<span class="intel-badge intel-badge-ppc">Competitor PPC: #${s.competitor_ppc_pos}</span>`
+        : '';
+      const orgPosBadge = s.competitor_organic_pos
+        ? `<span class="intel-badge intel-badge-organic">Competitor Organic: #${s.competitor_organic_pos}</span>`
+        : '';
+
+      const advLine  = ppcAdv.length  ? `<div style="font-size:11px;color:var(--tx3);margin-top:6px">PPC bidders: ${ppcAdv.map(_esc).join(', ')}</div>` : '';
+      const lsaLine  = lsaAdv.length  ? `<div style="font-size:11px;color:var(--tx3)">LSA advertisers: ${lsaAdv.map(_esc).join(', ')}</div>` : '';
+      const orgLine  = organic.length ? `<div style="font-size:11px;color:var(--tx3);margin-top:4px">Top organic: ${organic.map(o => `#${o.position} ${_esc(o.domain || o.title || '')}`).join(', ')}</div>` : '';
+      const dateStr  = new Date(s.scanned_at).toLocaleString();
+
+      return `
+        <div class="intel-result-item">
+          <div class="intel-result-kw">${_esc(s.keyword)}</div>
+          <div>${ppcBadge}${lsaBadge}${noBadge}</div>
+          <div style="margin-top:4px">${ppcPosBadge}${orgPosBadge}</div>
+          ${advLine}${lsaLine}${orgLine}
+          <div style="font-size:11px;color:var(--tx3);margin-top:6px">Scanned: ${dateStr}</div>
+        </div>`;
+    }).join('');
+
+    body.innerHTML = `<div class="intel-result-grid">${cards}</div>`;
+  } catch (e) {
+    if (body) body.innerHTML = '<p style="color:var(--tx3);font-size:13px">Error loading results.</p>';
+  }
+}
+
+function closeIntelResults() {
+  const panel = document.getElementById('intel-results-panel');
+  if (panel) panel.style.display = 'none';
 }
