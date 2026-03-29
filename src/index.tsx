@@ -1409,26 +1409,94 @@ app.get('/api/auth/me', async (c) => {
   return c.json({ user })
 })
 
+// ── GOOGLE OAUTH ─────────────────────────────────────────────────────────────
+// redirect_uri is HARDCODED to slm-hub.ca — never use new URL(c.req.url).origin.
+// Cloudflare Pages internal routing can resolve c.req.url to a deployment subdomain
+// (e.g. 46eea2eb.services-leads-marketing-hub.pages.dev) instead of the custom domain.
+// The redirect_uri must be character-for-character identical in both the auth request
+// and the token exchange — any mismatch causes Google to return invalid_grant.
+const GOOGLE_OAUTH_REDIRECT_URI = 'https://slm-hub.ca/api/auth/google/callback'
+
 app.get('/api/auth/google', (c) => {
   const clientId = c.env?.GOOGLE_ADS_CLIENT_ID
-  if (!clientId) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>Google Ads not configured</h2><p>Add GOOGLE_ADS_CLIENT_ID as a Cloudflare Pages secret.</p><a href="/app" style="color:#388bfd">Back</a></body></html>')
-  const redirectUri = new URL(c.req.url).origin + '/api/auth/google/callback'
-  return c.redirect(`https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent('https://www.googleapis.com/auth/adwords')}&access_type=offline&prompt=consent`)
+  if (!clientId) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>Google Ads not configured</h2><p style="color:#f87171">GOOGLE_ADS_CLIENT_ID secret is missing. Redeploy after adding it.</p><a href="/app" style="color:#388bfd">Back</a></body></html>')
+  return c.redirect(
+    `https://accounts.google.com/o/oauth2/v2/auth` +
+    `?client_id=${encodeURIComponent(clientId)}` +
+    `&redirect_uri=${encodeURIComponent(GOOGLE_OAUTH_REDIRECT_URI)}` +
+    `&response_type=code` +
+    `&scope=${encodeURIComponent('https://www.googleapis.com/auth/adwords')}` +
+    `&access_type=offline` +
+    `&prompt=consent`
+  )
 })
 
 app.get('/api/auth/google/callback', async (c) => {
-  const code = c.req.query('code')
-  const clientId = c.env?.GOOGLE_ADS_CLIENT_ID
+  const code        = c.req.query('code')
+  const errorParam  = c.req.query('error')
+  const clientId     = c.env?.GOOGLE_ADS_CLIENT_ID
   const clientSecret = c.env?.GOOGLE_ADS_CLIENT_SECRET
-  const redirectUri = new URL(c.req.url).origin + '/api/auth/google/callback'
-  const errorParam = c.req.query('error')
-  if (!code) return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff"><h2>❌ Auth Failed</h2><p style="color:#f87171">Google returned: ${errorParam || 'no code'}</p><a href="/app" style="color:#388bfd">Back</a></body></html>`)
-  if (!clientId || !clientSecret) return c.html('<html><body style="padding:40px;background:#09090B;color:#fff"><h2>❌ Missing credentials</h2><p style="color:#f87171">GOOGLE_ADS_CLIENT_ID or GOOGLE_ADS_CLIENT_SECRET not set in Cloudflare secrets.</p><a href="/app" style="color:#388bfd">Back</a></body></html>')
-  const tokenRes = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' }) })
+
+  // Google returned an error (e.g. access_denied)
+  if (!code) {
+    return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff;font-family:system-ui">
+      <h2>❌ Google Auth Failed</h2>
+      <p style="color:#f87171">Google returned: <code>${errorParam || 'no_code'}</code></p>
+      <p style="color:#71717A;font-size:14px">Check that your Google Cloud OAuth consent screen is published and the account has Google Ads API access.</p>
+      <a href="/app" style="color:#388bfd">← Back to Hub</a>
+    </body></html>`)
+  }
+
+  // Secrets missing — means redeploy needed
+  if (!clientId || !clientSecret) {
+    return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff;font-family:system-ui">
+      <h2>❌ Missing Credentials</h2>
+      <p style="color:#f87171">GOOGLE_ADS_CLIENT_ID or GOOGLE_ADS_CLIENT_SECRET not available in this deployment.</p>
+      <p style="color:#71717A;font-size:14px">Run: <code>npm run deploy</code> after setting secrets via wrangler pages secret put.</p>
+      <a href="/app" style="color:#388bfd">← Back to Hub</a>
+    </body></html>`)
+  }
+
+  // Token exchange — redirect_uri must be identical to auth request
+  const params = new URLSearchParams({
+    code,
+    client_id:     clientId,
+    client_secret: clientSecret,
+    redirect_uri:  GOOGLE_OAUTH_REDIRECT_URI,
+    grant_type:    'authorization_code'
+  })
+  console.log('[OAuth callback] exchanging code, redirect_uri:', GOOGLE_OAUTH_REDIRECT_URI)
+
+  const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params
+  })
   const tokens = await tokenRes.json() as any
-  if (tokens.access_token && c.env?.KV) await c.env.KV.put('google_oauth_tokens', JSON.stringify({ ...tokens, stored_at: Date.now() }), { expirationTtl: 60*60*24*30 })
-  const errDetail = tokens.error ? `<p style="color:#f87171">Error: ${tokens.error} — ${tokens.error_description || ''}</p>` : ''
-  return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff"><h2>${tokens.access_token ? '✅ Google Ads Connected!' : '❌ Token Exchange Failed'}</h2>${errDetail}<a href="/app" style="color:#388bfd">Back to Hub</a></body></html>`)
+  console.log('[OAuth callback] token response status:', tokenRes.status, 'error:', tokens.error || 'none')
+
+  if (tokens.access_token) {
+    if (c.env?.KV) {
+      await c.env.KV.put('google_oauth_tokens', JSON.stringify({
+        access_token:  tokens.access_token,
+        refresh_token: tokens.refresh_token || null,
+        expires_in:    tokens.expires_in || 3600,
+        token_type:    tokens.token_type || 'Bearer',
+        scope:         tokens.scope || '',
+        stored_at:     Date.now()
+      }), { expirationTtl: 60 * 60 * 24 * 30 })
+    }
+    return c.redirect('/app?oauth=success')
+  }
+
+  // Token exchange failed — show Google's exact error
+  return c.html(`<html><body style="padding:40px;background:#09090B;color:#fff;font-family:system-ui">
+    <h2>❌ Token Exchange Failed</h2>
+    <p style="color:#f87171"><strong>${tokens.error || 'unknown_error'}</strong>: ${tokens.error_description || 'No description from Google'}</p>
+    <p style="color:#71717A;font-size:13px">HTTP status: ${tokenRes.status} | redirect_uri used: <code>${GOOGLE_OAUTH_REDIRECT_URI}</code></p>
+    <p style="color:#71717A;font-size:13px">Verify this redirect_uri is registered exactly in Google Cloud Console → Credentials → OAuth Client → Authorized redirect URIs.</p>
+    <a href="/app" style="color:#388bfd">← Back to Hub</a>
+  </body></html>`)
 })
 
 app.get('/api/auth/google/status', async (c) => {

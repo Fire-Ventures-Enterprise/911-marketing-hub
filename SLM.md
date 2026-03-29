@@ -227,6 +227,11 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **`refreshGoogleToken` signature updated** to accept `Bindings` directly (was `Bindings & Record<string, any>`) — `GOOGLE_ADS_CLIENT_ID` and `GOOGLE_ADS_CLIENT_SECRET` are now proper typed fields
 - **OAuth callback now shows Google error detail** — if token exchange fails, page renders `tokens.error` + `tokens.error_description` for debugging; also shows missing-credentials error before even calling Google token endpoint
 - **`encodeURIComponent(clientId)` added to OAuth redirect URL** — `client_id` is already URI-safe but encoding it is defensive best practice; redirect_uri and scope were already encoded
+- **CRITICAL: Never use `new URL(c.req.url).origin` for OAuth redirect_uri** — Cloudflare Pages internal routing can resolve `c.req.url` to a deployment subdomain (e.g. `46eea2eb.services-leads-marketing-hub.pages.dev`) instead of the custom domain `slm-hub.ca`; the redirect_uri in the token exchange would then mismatch what Google received in the auth request → `invalid_grant`
+- **OAuth redirect_uri is hardcoded** to `https://slm-hub.ca/api/auth/google/callback` via `GOOGLE_OAUTH_REDIRECT_URI` constant — must be identical in both `GET /api/auth/google` (auth request) and `GET /api/auth/google/callback` (token exchange); character-for-character match required by Google
+- **On OAuth success redirect to `/app?oauth=success`** — not a static HTML page; cleaner UX and allows the app to show a success toast
+- **OAuth callback error pages now show Google's exact error** — `tokens.error` + `tokens.error_description` + HTTP status + which redirect_uri was used; helpful for diagnosing future `invalid_grant` or `invalid_client` errors
+- **Token storage format on success**: `{ access_token, refresh_token, expires_in, token_type, scope, stored_at }` — explicit field list prevents accidentally storing Google debug fields; KV key `google_oauth_tokens`, 30-day TTL
 
 ---
 
