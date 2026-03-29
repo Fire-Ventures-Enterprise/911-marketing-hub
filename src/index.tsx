@@ -3794,4 +3794,374 @@ app.patch('/api/scraper/brand-profile', async (c) => {
   }
 })
 
+// ── BUSINESS PROSPECTOR ───────────────────────────────────────────────────
+
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  ottawa:      { lat: 45.4215, lng: -75.6972 },
+  toronto:     { lat: 43.6532, lng: -79.3832 },
+  montreal:    { lat: 45.5017, lng: -73.5673 },
+  vancouver:   { lat: 49.2827, lng: -123.1207 },
+  calgary:     { lat: 51.0447, lng: -114.0719 },
+  edmonton:    { lat: 53.5461, lng: -113.4938 },
+  winnipeg:    { lat: 49.8951, lng: -97.1384 },
+  hamilton:    { lat: 43.2557, lng: -79.8711 },
+  kitchener:   { lat: 43.4516, lng: -80.4925 },
+  london:      { lat: 42.9849, lng: -81.2453 },
+  halifax:     { lat: 44.6488, lng: -63.5752 },
+  victoria:    { lat: 48.4284, lng: -123.3656 },
+  saskatoon:   { lat: 52.1332, lng: -106.6700 },
+  regina:      { lat: 50.4452, lng: -104.6189 },
+  mississauga: { lat: 43.5890, lng: -79.6441 },
+  brampton:    { lat: 43.7315, lng: -79.7624 },
+  surrey:      { lat: 49.1913, lng: -122.8490 },
+  laval:       { lat: 45.5617, lng: -73.6921 },
+  markham:     { lat: 43.8561, lng: -79.3370 },
+  vaughan:     { lat: 43.8563, lng: -79.5085 },
+  'north york':{ lat: 43.7615, lng: -79.4111 },
+  scarborough: { lat: 43.7731, lng: -79.2578 },
+  'new york':  { lat: 40.7128, lng: -74.0060 },
+  chicago:     { lat: 41.8781, lng: -87.6298 },
+  houston:     { lat: 29.7604, lng: -95.3698 },
+  phoenix:     { lat: 33.4484, lng: -112.0740 },
+  dallas:      { lat: 32.7767, lng: -96.7970 },
+  miami:       { lat: 25.7617, lng: -80.1918 },
+  seattle:     { lat: 47.6062, lng: -122.3321 },
+  denver:      { lat: 39.7392, lng: -104.9903 },
+}
+
+function calcSlmScore(b: any): number {
+  let score = 0
+  if (!b.website_url)                                          score += 30
+  if (b.google_rating && b.google_rating < 4.0)               score += 20
+  if (!b.google_review_count || b.google_review_count < 10)   score += 15
+  if (!b.facebook_url && !b.instagram_url && !b.linkedin_url) score += 15
+  if (b.phone && !b.email)                                     score += 10
+  return Math.min(100, score)
+}
+
+function slmScoreTier(score: number): string {
+  if (score >= 70) return 'hot'
+  if (score >= 40) return 'warm'
+  return 'cold'
+}
+
+async function scrapeProspectWebsite(url: string): Promise<{
+  email?: string; facebook?: string; instagram?: string; linkedin?: string
+}> {
+  try {
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SLMBot/1.0; +https://slm-hub.ca)' },
+      signal: AbortSignal.timeout(8000)
+    })
+    if (!r.ok) return {}
+    const html = (await r.text()).slice(0, 250000)
+    const emailRaw = html.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g)
+    const emails = emailRaw ? [...new Set(emailRaw)].filter(e =>
+      !e.includes('example.') && !e.endsWith('.png') && !e.endsWith('.jpg') &&
+      !e.includes('sentry') && !e.includes('schema') && !e.includes('wix') &&
+      !e.includes('@2x') && e.length < 80
+    ) : []
+    const fbM  = html.match(/facebook\.com\/(?!sharer|share|plugins|tr\?|dialog)([a-zA-Z0-9._\-]{3,})/i)
+    const igM  = html.match(/instagram\.com\/([a-zA-Z0-9._]{3,})\/?(?=['"\s])/i)
+    const liM  = html.match(/linkedin\.com\/company\/([a-zA-Z0-9._\-]{3,})/i)
+    return {
+      email:     emails[0] || undefined,
+      facebook:  fbM  ? `https://facebook.com/${fbM[1]}`              : undefined,
+      instagram: igM  ? `https://instagram.com/${igM[1]}`             : undefined,
+      linkedin:  liM  ? `https://linkedin.com/company/${liM[1]}`      : undefined,
+    }
+  } catch { return {} }
+}
+
+// POST /api/prospector/search
+app.post('/api/prospector/search', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+
+  const body = await c.req.json()
+  const niche      = (body.niche      || '').trim()
+  const city       = (body.city       || '').trim()
+  const radius_km  = Number(body.radius_km  || 25)
+  const filter     = body.filter      || 'all'
+  const min_reviews = Number(body.min_reviews || 0)
+
+  if (!niche || !city) return c.json({ error: 'niche and city are required' }, 400)
+
+  const now          = new Date().toISOString()
+  const searchQuery  = `${niche} ${city}`
+  const radiusMeters = radius_km * 1000
+  const cityKey      = city.toLowerCase().trim()
+  const coords       = CITY_COORDS[cityKey]
+
+  const results: any[] = []
+
+  // ── SOURCE 1: Google Places API ─────────────────────────────────────────
+  if (c.env?.GOOGLE_PLACES_API_KEY) {
+    try {
+      const reqBody: any = { textQuery: searchQuery, maxResultCount: 20, languageCode: 'en' }
+      if (coords) {
+        reqBody.locationBias = {
+          circle: { center: { latitude: coords.lat, longitude: coords.lng }, radius: radiusMeters }
+        }
+      }
+      const pr = await fetch('https://places.googleapis.com/v1/places:searchText', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': c.env.GOOGLE_PLACES_API_KEY,
+          'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.googleMapsUri,places.id,places.businessStatus'
+        },
+        body: JSON.stringify(reqBody)
+      })
+      if (pr.ok) {
+        const pd = await pr.json() as any
+        for (const p of (pd.places || [])) {
+          if (p.businessStatus === 'CLOSED_PERMANENTLY') continue
+          results.push({
+            business_name: p.displayName?.text || '',
+            address: p.formattedAddress || '',
+            phone: p.nationalPhoneNumber || null,
+            website_url: p.websiteUri || null,
+            google_rating: p.rating || null,
+            google_review_count: p.userRatingCount || 0,
+            google_maps_url: p.googleMapsUri || null,
+            google_place_id: p.id || null,
+            source: 'google_places',
+            email: null, facebook_url: null, instagram_url: null, linkedin_url: null
+          })
+        }
+      }
+    } catch { /* Places API unavailable */ }
+  }
+
+  // ── SOURCE 2: SerpAPI Google Maps ────────────────────────────────────────
+  if (c.env?.SERPAPI_KEY) {
+    try {
+      const serpUrl = `https://serpapi.com/search.json?engine=google_maps&q=${encodeURIComponent(searchQuery)}&api_key=${c.env.SERPAPI_KEY}&num=20`
+      const sr = await fetch(serpUrl)
+      if (sr.ok) {
+        const sd = await sr.json() as any
+        for (const item of (sd.local_results || [])) {
+          const dup = results.some(r =>
+            r.business_name.toLowerCase().trim() === (item.title || '').toLowerCase().trim()
+          )
+          if (dup) continue
+          results.push({
+            business_name: item.title || '',
+            address: item.address || '',
+            phone: item.phone || null,
+            website_url: item.website || null,
+            google_rating: item.rating || null,
+            google_review_count: item.reviews || 0,
+            google_maps_url: item.place_id ? `https://www.google.com/maps/place/?q=place_id:${item.place_id}` : null,
+            google_place_id: item.place_id || null,
+            source: 'serp_maps',
+            email: null, facebook_url: null, instagram_url: null, linkedin_url: null
+          })
+        }
+      }
+    } catch { /* SerpAPI unavailable */ }
+  }
+
+  // ── SOURCE 3: Website scrape (max 10) ────────────────────────────────────
+  let scrapeCount = 0
+  for (const biz of results) {
+    if (!biz.website_url || scrapeCount >= 10) break
+    const scraped = await scrapeProspectWebsite(biz.website_url)
+    if (scraped.email)     biz.email         = scraped.email
+    if (scraped.facebook)  biz.facebook_url  = scraped.facebook
+    if (scraped.instagram) biz.instagram_url = scraped.instagram
+    if (scraped.linkedin)  biz.linkedin_url  = scraped.linkedin
+    scrapeCount++
+  }
+
+  // ── Score + annotate ─────────────────────────────────────────────────────
+  for (const biz of results) {
+    biz.slm_score    = calcSlmScore(biz)
+    biz.slm_tier     = slmScoreTier(biz.slm_score)
+    biz.city         = city
+    biz.search_query = searchQuery
+  }
+
+  // ── Filter ────────────────────────────────────────────────────────────────
+  let filtered = [...results]
+  if      (filter === 'has_website')  filtered = filtered.filter(b => b.website_url)
+  else if (filter === 'has_phone')    filtered = filtered.filter(b => b.phone)
+  else if (filter === 'no_profile')   filtered = filtered.filter(b => !b.google_place_id)
+  else if (filter === 'weak_rating')  filtered = filtered.filter(b => b.google_rating && b.google_rating < 4.0)
+  if (min_reviews > 0) filtered = filtered.filter(b => (b.google_review_count || 0) >= min_reviews)
+
+  filtered.sort((a, b) => b.slm_score - a.slm_score)
+
+  // ── Persist to D1 ────────────────────────────────────────────────────────
+  for (const biz of filtered) {
+    try {
+      await c.env.DB.prepare(
+        `INSERT INTO scraped_businesses
+         (company_id, search_query, business_name, website_url, phone, email, address, city,
+          google_place_id, google_rating, google_review_count, google_maps_url,
+          facebook_url, instagram_url, linkedin_url, scraped_at, source, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'raw')`
+      ).bind(
+        null, searchQuery, biz.business_name, biz.website_url || null,
+        biz.phone || null, biz.email || null, biz.address || null, city,
+        biz.google_place_id || null, biz.google_rating || null,
+        biz.google_review_count || 0, biz.google_maps_url || null,
+        biz.facebook_url || null, biz.instagram_url || null, biz.linkedin_url || null,
+        now, biz.source
+      ).run()
+    } catch { /* skip duplicates or errors */ }
+  }
+
+  return c.json({
+    results:      filtered,
+    total:        filtered.length,
+    search_query: searchQuery,
+    sources_used: {
+      google_places: !!c.env?.GOOGLE_PLACES_API_KEY,
+      serp_maps:     !!c.env?.SERPAPI_KEY,
+      website_scrapes: scrapeCount
+    }
+  })
+})
+
+// GET /api/prospector/prospects
+app.get('/api/prospector/prospects', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ prospects: [] })
+  const rows = await c.env.DB.prepare(
+    `SELECT * FROM scraped_businesses WHERE status != 'raw' ORDER BY scraped_at DESC LIMIT 200`
+  ).all()
+  const prospects = (rows.results || []).map((r: any) => ({
+    ...r,
+    slm_score: calcSlmScore(r),
+    slm_tier:  slmScoreTier(calcSlmScore(r))
+  }))
+  return c.json({ prospects })
+})
+
+// POST /api/prospector/save  (action: 'prospect' | 'competitor')
+app.post('/api/prospector/save', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const { business, action } = await c.req.json()
+  const now = new Date().toISOString()
+
+  if (action === 'competitor') {
+    try {
+      const ins = await c.env.DB.prepare(
+        `INSERT INTO competitors
+         (company_id, competitor_name, website_url, google_place_id, territory,
+          google_rating, google_review_count, google_maps_url,
+          status, added_at, detected_by, scan_status, serp_keywords)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 'prospector', 'pending', '[]')`
+      ).bind(
+        null,
+        business.business_name,
+        business.website_url || null,
+        business.google_place_id || null,
+        business.city || null,
+        business.google_rating || null,
+        business.google_review_count || 0,
+        business.google_maps_url || null,
+        now
+      ).run()
+      return c.json({ success: true, id: ins.meta?.last_row_id, action: 'competitor' })
+    } catch (e: any) {
+      return c.json({ error: e.message || 'Failed to add competitor' }, 500)
+    }
+  }
+
+  // Default: save as prospect
+  try {
+    // If record already exists from a prior raw search, update it to prospect
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM scraped_businesses WHERE business_name = ? AND city = ? LIMIT 1`
+    ).bind(business.business_name, business.city || '').first() as any
+    if (existing) {
+      await c.env.DB.prepare(`UPDATE scraped_businesses SET status = 'prospect' WHERE id = ?`).bind(existing.id).run()
+      return c.json({ success: true, id: existing.id, action: 'prospect' })
+    }
+    const ins = await c.env.DB.prepare(
+      `INSERT INTO scraped_businesses
+       (company_id, search_query, business_name, website_url, phone, email, address, city,
+        google_place_id, google_rating, google_review_count, google_maps_url,
+        facebook_url, instagram_url, linkedin_url, scraped_at, source, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prospect')`
+    ).bind(
+      null,
+      business.search_query || '',
+      business.business_name,
+      business.website_url || null,
+      business.phone || null,
+      business.email || null,
+      business.address || null,
+      business.city || null,
+      business.google_place_id || null,
+      business.google_rating || null,
+      business.google_review_count || 0,
+      business.google_maps_url || null,
+      business.facebook_url || null,
+      business.instagram_url || null,
+      business.linkedin_url || null,
+      now,
+      business.source || 'manual'
+    ).run()
+    return c.json({ success: true, id: ins.meta?.last_row_id, action: 'prospect' })
+  } catch (e: any) {
+    return c.json({ error: e.message || 'Save failed' }, 500)
+  }
+})
+
+// PATCH /api/prospector/prospects/:id/status
+app.patch('/api/prospector/prospects/:id/status', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const id = Number(c.req.param('id'))
+  const { status } = await c.req.json()
+  const valid = ['new','contacted','interested','demo_scheduled','converted','not_interested']
+  if (!valid.includes(status)) return c.json({ error: 'Invalid status' }, 400)
+  await c.env.DB.prepare('UPDATE scraped_businesses SET status = ? WHERE id = ?').bind(status, id).run()
+  return c.json({ success: true })
+})
+
+// DELETE /api/prospector/prospects/:id
+app.delete('/api/prospector/prospects/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const id = Number(c.req.param('id'))
+  await c.env.DB.prepare('DELETE FROM scraped_businesses WHERE id = ?').bind(id).run()
+  return c.json({ success: true })
+})
+
+// GET /api/prospector/export
+app.get('/api/prospector/export', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM scraped_businesses ORDER BY scraped_at DESC LIMIT 1000'
+  ).all()
+  const hdrs = ['business_name','phone','email','website_url','address','city',
+                'google_rating','google_review_count','facebook_url','instagram_url',
+                'linkedin_url','search_query','source','status','scraped_at']
+  const csv = [
+    hdrs.join(','),
+    ...(rows.results || []).map((r: any) =>
+      hdrs.map(h => JSON.stringify(r[h] ?? '')).join(',')
+    )
+  ].join('\n')
+  return new Response(csv, {
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="slm-prospects-${new Date().toISOString().slice(0,10)}.csv"`
+    }
+  })
+})
+
 export default app

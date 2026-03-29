@@ -130,7 +130,8 @@ const SECTION_LABELS = {
   companies:     'Company Management',
   settings:      'Settings',
   'brand-profile': 'Brand Profile',
-  intel:           'Competitor Intelligence'
+  intel:           'Competitor Intelligence',
+  prospector:      'Business Prospector'
 };
 
 function showSection(id) {
@@ -155,6 +156,7 @@ function showSection(id) {
   if (id === 'settings')       { loadTeam(); loadDataPrivacy(); }
   if (id === 'brand-profile')  { loadBrandProfile(); }
   if (id === 'intel')          { loadIntel(); }
+  if (id === 'prospector')     { loadProspector(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -2902,4 +2904,320 @@ async function showCompetitorResults(id) {
 function closeIntelResults() {
   const panel = document.getElementById('intel-results-panel');
   if (panel) panel.style.display = 'none';
+}
+
+// ── BUSINESS PROSPECTOR ──────────────────────────────────────────────────────
+
+let _prospectorResults = [];
+
+function loadProspector() {
+  loadProspectPipeline();
+}
+
+async function searchProspects() {
+  const niche   = (document.getElementById('prosp-niche')?.value || '').trim();
+  const city    = (document.getElementById('prosp-city')?.value  || '').trim();
+  const radius  = parseInt(document.getElementById('prosp-radius')?.value  || '10');
+  const bizType = document.getElementById('prosp-biz-type')?.value || '';
+  const minRev  = parseInt(document.getElementById('prosp-min-reviews')?.value || '0');
+
+  if (!niche || !city) { showToast('Niche and city are required', true); return; }
+
+  const btn     = document.getElementById('prosp-search-btn');
+  const msgEl   = document.getElementById('prosp-search-msg');
+  const resCard = document.getElementById('prosp-results-card');
+  const resEl   = document.getElementById('prosp-results');
+
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Searching…'; }
+  if (msgEl) msgEl.innerHTML = '<p style="color:var(--tx3);font-size:13px">Searching 3 sources (Google Places, Maps, website scrape)… this may take 15–30 seconds.</p>';
+  if (resCard) resCard.style.display = 'none';
+  if (resEl) resEl.innerHTML = '';
+
+  try {
+    const body = { niche, city, radius };
+    if (bizType) body.business_type = bizType;
+    if (minRev > 0) body.min_reviews = minRev;
+
+    const r = await fetch('/api/prospector/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Search failed');
+
+    _prospectorResults = d.results || [];
+    renderProspectResults(_prospectorResults);
+
+    const titleEl = document.getElementById('prosp-results-title');
+    if (titleEl) titleEl.textContent = `Search Results (${_prospectorResults.length})`;
+    if (resCard) resCard.style.display = '';
+    if (msgEl) msgEl.innerHTML = `<p style="color:var(--tx3);font-size:13px">Found ${_prospectorResults.length} business(es). Hot leads are scored highest.</p>`;
+  } catch (e) {
+    if (msgEl) msgEl.innerHTML = `<p style="color:#f87171;font-size:13px">Search error: ${_esc(e.message)}</p>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 Search'; }
+  }
+}
+
+function renderProspectResults(results) {
+  const el = document.getElementById('prosp-results');
+  if (!el) return;
+
+  if (!results.length) {
+    el.innerHTML = '<p style="color:var(--tx3);font-size:13px;padding:16px 0">No results found. Try a broader niche, different city, or larger radius.</p>';
+    return;
+  }
+
+  el.innerHTML = results.map((b, i) => {
+    const score = b.slm_score || 0;
+    const tier  = score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';
+    const emoji = tier === 'hot' ? '🔥' : tier === 'warm' ? '♨️' : '🧊';
+    const stars = b.google_rating
+      ? `⭐ ${Number(b.google_rating).toFixed(1)} (${b.google_review_count || 0})`
+      : 'No rating';
+    const websiteHtml = b.website_url
+      ? `<a href="${_esc(b.website_url)}" target="_blank" style="color:var(--blue)">${_esc(b.website_url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))}</a>`
+      : '<span style="color:#4ade80;font-weight:700">NO WEBSITE ✓</span>';
+
+    const facebookHtml  = b.facebook_url  ? `<a href="${_esc(b.facebook_url)}"  target="_blank" style="color:var(--blue)">${_esc(b.facebook_url)}</a>`  : '<em style="color:var(--tx3)">—</em>';
+    const instagramHtml = b.instagram_url ? `<a href="${_esc(b.instagram_url)}" target="_blank" style="color:var(--blue)">${_esc(b.instagram_url)}</a>` : '<em style="color:var(--tx3)">—</em>';
+    const linkedinHtml  = b.linkedin_url  ? `<a href="${_esc(b.linkedin_url)}"  target="_blank" style="color:var(--blue)">${_esc(b.linkedin_url)}</a>`  : '<em style="color:var(--tx3)">—</em>';
+
+    return `
+      <div class="prosp-row" id="prosp-row-${i}">
+        <span class="prosp-score-badge prosp-score-${tier}" style="margin-top:2px">${emoji} ${score}</span>
+        <div class="prosp-main">
+          <div class="prosp-name">${_esc(b.business_name)}</div>
+          <div class="prosp-addr">${_esc(b.address || b.city || '')}</div>
+          <div class="prosp-meta">
+            <span>${stars}</span>
+            ${b.phone ? `<span>📞 ${_esc(b.phone)}</span>` : ''}
+            <span>🌐 ${websiteHtml}</span>
+          </div>
+          <div class="prosp-expand" id="prosp-exp-${i}">
+            <div class="prosp-field"><span class="prosp-field-label">Email:</span><span class="prosp-field-val">${b.email ? `<a href="mailto:${_esc(b.email)}" style="color:var(--blue)">${_esc(b.email)}</a>` : '<em style="color:var(--tx3)">Not found</em>'}</span></div>
+            <div class="prosp-field"><span class="prosp-field-label">Facebook:</span><span class="prosp-field-val">${facebookHtml}</span></div>
+            <div class="prosp-field"><span class="prosp-field-label">Instagram:</span><span class="prosp-field-val">${instagramHtml}</span></div>
+            <div class="prosp-field"><span class="prosp-field-label">LinkedIn:</span><span class="prosp-field-val">${linkedinHtml}</span></div>
+            <div class="prosp-field"><span class="prosp-field-label">Source:</span><span class="prosp-field-val"><span class="prosp-source">${_esc(b.source || 'places')}</span></span></div>
+            <div class="btn-row" style="margin-top:10px">
+              <button class="btn btn-sm btn-primary" onclick="saveAsProspect(${i})">💼 Save as Prospect</button>
+              <button class="btn btn-sm btn-sec"     onclick="saveAsCompetitor(${i})">🕵️ Add as Competitor</button>
+              ${b.email ? `<button class="btn btn-sm btn-green" onclick="openOnboardModal(${i})">✅ Onboard Client</button>` : ''}
+              ${b.email ? `<button class="btn btn-sm btn-sec"   onclick="_copyToClipboard('${_esc(b.email).replace(/'/g,"\\'")}')">📋 Copy Email</button>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="prosp-actions">
+          <button class="btn btn-sm btn-sec" id="prosp-exp-btn-${i}" onclick="toggleProspectExpand(${i})">Details ▾</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleProspectExpand(idx) {
+  const panel = document.getElementById(`prosp-exp-${idx}`);
+  const btn   = document.getElementById(`prosp-exp-btn-${idx}`);
+  if (!panel) return;
+  const isOpen = panel.classList.contains('open');
+  panel.classList.toggle('open', !isOpen);
+  if (btn) btn.textContent = isOpen ? 'Details ▾' : 'Details ▴';
+}
+
+async function saveAsProspect(idx) {
+  const b = _prospectorResults[idx];
+  if (!b) return;
+  try {
+    const r = await fetch('/api/prospector/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ ...b, save_type: 'prospect' })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Save failed');
+    showToast('✅ Saved to Prospects Pipeline!');
+    loadProspectPipeline();
+  } catch (e) {
+    showToast('Save failed: ' + e.message, true);
+  }
+}
+
+async function saveAsCompetitor(idx) {
+  const b = _prospectorResults[idx];
+  if (!b) return;
+  try {
+    const r = await fetch('/api/prospector/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ ...b, save_type: 'competitor' })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Save failed');
+    showToast('✅ Added to Competitor Intel!');
+  } catch (e) {
+    showToast('Save failed: ' + e.message, true);
+  }
+}
+
+function openOnboardModal(idx) {
+  const b = _prospectorResults[idx];
+  if (!b) return;
+  // Navigate to Tenants tab and open the invite modal with pre-filled data
+  showSection('tenants');
+  setTimeout(() => {
+    showInviteModal();
+    setTimeout(() => {
+      const nameEl  = document.getElementById('tn-f-name');
+      const emailEl = document.getElementById('tn-f-email');
+      const noteEl  = document.getElementById('tn-f-notes');
+      if (nameEl)  nameEl.value  = b.business_name || '';
+      if (emailEl && b.email) emailEl.value = b.email;
+      if (noteEl)  noteEl.value  = [
+        b.phone      ? `Phone: ${b.phone}` : '',
+        b.address    ? `Address: ${b.address}` : '',
+        b.website_url ? `Website: ${b.website_url}` : 'NO WEBSITE',
+        `SLM Score: ${b.slm_score || 0}`,
+      ].filter(Boolean).join('\n');
+    }, 350);
+  }, 150);
+}
+
+async function loadProspectPipeline() {
+  const el = document.getElementById('prosp-pipeline-body');
+  if (!el) return;
+  el.innerHTML = '<p style="color:var(--tx3);font-size:13px">Loading…</p>';
+  try {
+    const r = await fetch('/api/prospector/prospects', {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Load failed');
+    const prospects = d.prospects || [];
+
+    if (!prospects.length) {
+      el.innerHTML = '<p style="color:var(--tx3);font-size:13px">No saved prospects yet. Search for businesses above and click <strong>Save as Prospect</strong>.</p>';
+      return;
+    }
+
+    const rows = prospects.map(p => {
+      const score = p.slm_score || 0;
+      const tier  = score >= 70 ? 'hot' : score >= 40 ? 'warm' : 'cold';
+      const emoji = tier === 'hot' ? '🔥' : tier === 'warm' ? '♨️' : '🧊';
+      const statuses = ['new','contacted','qualified','converted','lost'];
+      const opts = statuses.map(s =>
+        `<option value="${s}" ${p.status === s ? 'selected' : ''}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`
+      ).join('');
+      const contactHtml = [
+        p.phone ? `📞 ${_esc(p.phone)}` : '',
+        p.email ? `✉️ <a href="mailto:${_esc(p.email)}" style="color:var(--blue)">${_esc(p.email)}</a>` : '',
+      ].filter(Boolean).join('<br>') || '<span style="color:var(--tx3);font-size:11px">No contact</span>';
+
+      return `
+        <tr>
+          <td style="padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.03)">
+            <div style="font-weight:600;font-size:13px">${_esc(p.business_name)}</div>
+            <div style="font-size:11px;color:var(--tx3)">${_esc(p.city || '')}</div>
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.03)">
+            <span class="prosp-score-badge prosp-score-${tier}">${emoji} ${score}</span>
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.03);font-size:12px">${contactHtml}</td>
+          <td style="padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.03)">
+            <select style="font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--bg-in);color:var(--tx)" onchange="updateProspectStatus(${p.id}, this.value)">${opts}</select>
+          </td>
+          <td style="padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.03);white-space:nowrap">
+            ${p.email ? `<button class="btn btn-sm btn-sec" onclick="_copyToClipboard('${_esc(p.email).replace(/'/g,"\\'")}')">📋</button> ` : ''}
+            <button class="btn btn-sm btn-sec" onclick="deleteProspect(${p.id})" style="color:#f87171" title="Remove">🗑</button>
+          </td>
+        </tr>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr>
+              <th style="text-align:left;padding:8px;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--tx3);border-bottom:1px solid var(--bd)">Business</th>
+              <th style="text-align:left;padding:8px;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--tx3);border-bottom:1px solid var(--bd)">Score</th>
+              <th style="text-align:left;padding:8px;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--tx3);border-bottom:1px solid var(--bd)">Contact</th>
+              <th style="text-align:left;padding:8px;font-size:10px;font-weight:700;text-transform:uppercase;color:var(--tx3);border-bottom:1px solid var(--bd)">Status</th>
+              <th style="padding:8px;border-bottom:1px solid var(--bd)"></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<p style="color:#f87171;font-size:13px">Error: ${_esc(e.message)}</p>`;
+  }
+}
+
+async function updateProspectStatus(id, status) {
+  try {
+    const r = await fetch(`/api/prospector/prospects/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ status })
+    });
+    if (!r.ok) throw new Error('Update failed');
+    showToast('Status updated');
+  } catch (e) {
+    showToast('Status update failed: ' + e.message, true);
+  }
+}
+
+async function deleteProspect(id) {
+  if (!confirm('Remove this prospect from the pipeline?')) return;
+  try {
+    const r = await fetch(`/api/prospector/prospects/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    if (!r.ok) throw new Error('Delete failed');
+    showToast('Prospect removed');
+    loadProspectPipeline();
+  } catch (e) {
+    showToast('Delete failed: ' + e.message, true);
+  }
+}
+
+async function exportProspects() {
+  try {
+    const r = await fetch('/api/prospector/export', {
+      headers: { Authorization: `Bearer ${getStoredToken()}` }
+    });
+    if (!r.ok) throw new Error('Export failed');
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `prospects-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('Export failed: ' + e.message, true);
+  }
+}
+
+function _copyToClipboard(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => showToast('Copied!')).catch(() => _copyFallback(text));
+  } else {
+    _copyFallback(text);
+  }
+}
+
+function _copyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity  = '0';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try { document.execCommand('copy'); showToast('Copied!'); } catch { showToast('Copy failed', true); }
+  document.body.removeChild(ta);
 }

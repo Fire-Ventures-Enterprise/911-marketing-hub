@@ -765,6 +765,26 @@
     .intel-badge-lsa     { background: rgba(251,191,36,.12);  color: #fbbf24; border: 1px solid rgba(251,191,36,.3); }
     .intel-badge-organic { background: rgba(74,222,128,.12);  color: #4ade80; border: 1px solid rgba(74,222,128,.3); }
     .intel-badge-none    { background: rgba(148,163,184,.1);  color: #94a3b8; border: 1px solid rgba(148,163,184,.25); }
+
+    /* ── BUSINESS PROSPECTOR ── */
+    .prosp-score-badge { display:inline-flex;align-items:center;justify-content:center;min-width:48px;height:26px;padding:0 8px;border-radius:20px;font-size:12px;font-weight:800;border:1px solid; }
+    .prosp-score-hot  { background:rgba(248,113,113,.12); color:#f87171; border-color:rgba(248,113,113,.3); }
+    .prosp-score-warm { background:rgba(245,158,11,.12);  color:#F59E0B; border-color:rgba(245,158,11,.3); }
+    .prosp-score-cold { background:rgba(148,163,184,.1);  color:#94a3b8; border-color:rgba(148,163,184,.25); }
+    .prosp-row { display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid var(--bd);flex-wrap:wrap; }
+    .prosp-row:last-child { border-bottom:none; }
+    .prosp-row:hover { background:rgba(255,255,255,.015); }
+    .prosp-main { flex:1;min-width:200px; }
+    .prosp-name { font-weight:700;font-size:14px;color:var(--tx); }
+    .prosp-addr { font-size:12px;color:var(--tx3);margin-top:2px; }
+    .prosp-meta { font-size:12px;color:var(--tx2);margin-top:4px;display:flex;flex-wrap:wrap;gap:8px; }
+    .prosp-actions { display:flex;gap:6px;flex-wrap:wrap;align-items:flex-start;flex-shrink:0; }
+    .prosp-expand { background:var(--bg-in);border:1px solid var(--bd);border-radius:var(--r);padding:12px;margin-top:8px;display:none; }
+    .prosp-expand.open { display:block; }
+    .prosp-field { margin-bottom:6px;display:flex;gap:8px;align-items:flex-start;font-size:12px; }
+    .prosp-field-label { color:var(--tx3);min-width:76px;flex-shrink:0; }
+    .prosp-field-val { color:var(--tx2);word-break:break-all; }
+    .prosp-source { display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;background:var(--bg-s);border:1px solid var(--bd);color:var(--tx3); }
   </style>
 </head>
 <body>
@@ -861,6 +881,9 @@
       </button>
       <button class="nav-item" data-section="intel" onclick="showSection('intel')">
         <span class="nav-icon">🕵️</span><span>Intel</span>
+      </button>
+      <button class="nav-item super-nav" data-section="prospector" onclick="showSection('prospector')" style="display:none">
+        <span class="nav-icon">🔭</span><span>Prospector</span>
       </button>
 
       <div class="sb-group super-nav" style="display:none">Admin</div>
@@ -1887,6 +1910,91 @@
           <div id="intel-results-body">
             <p style="color:var(--tx3);font-size:13px">No results loaded.</p>
           </div>
+        </div>
+      </div>
+
+      <!-- BUSINESS PROSPECTOR -->
+      <div class="pane" id="pane-prospector">
+        <div class="ph"><h2>🔭 Business Prospector</h2><p>Search any niche + city to find businesses with weak digital presence. SLM Opportunity Score: no website +30, low rating +20, few reviews +15, no social +15, phone-only +10.</p></div>
+
+        <!-- Search Form -->
+        <div class="card">
+          <div class="card-hd"><div class="card-title">🔍 Search Businesses</div></div>
+          <div class="fg2">
+            <div class="ff">
+              <label>Niche / Keyword *</label>
+              <input type="text" id="prosp-niche" placeholder="e.g. water damage restoration, plumber, roofer" onkeydown="if(event.key==='Enter')searchProspects()">
+            </div>
+            <div class="ff">
+              <label>City *</label>
+              <input type="text" id="prosp-city" placeholder="e.g. Ottawa, Toronto, Calgary" onkeydown="if(event.key==='Enter')searchProspects()">
+            </div>
+          </div>
+          <div class="fg2" style="margin-top:12px">
+            <div class="ff">
+              <label>Search Radius (km)</label>
+              <select id="prosp-radius">
+                <option value="5">5 km</option>
+                <option value="10" selected>10 km</option>
+                <option value="20">20 km</option>
+                <option value="50">50 km</option>
+              </select>
+            </div>
+            <div class="ff">
+              <label>Business Type Filter</label>
+              <select id="prosp-biz-type">
+                <option value="">All types</option>
+                <option value="plumber">Plumber</option>
+                <option value="electrician">Electrician</option>
+                <option value="roofing contractor">Roofing</option>
+                <option value="hvac">HVAC</option>
+                <option value="water damage restoration">Water/Fire Restoration</option>
+                <option value="general contractor">Renovation / Contractor</option>
+                <option value="landscaping">Landscaping</option>
+                <option value="cleaning service">Cleaning</option>
+              </select>
+            </div>
+            <div class="ff">
+              <label>Min Google Reviews</label>
+              <select id="prosp-min-reviews">
+                <option value="0">Any (include zero)</option>
+                <option value="1">At least 1</option>
+                <option value="5">At least 5</option>
+                <option value="10">At least 10</option>
+              </select>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top:16px">
+            <button class="btn btn-primary" id="prosp-search-btn" onclick="searchProspects()">🔍 Search</button>
+          </div>
+          <div id="prosp-search-msg" style="margin-top:10px"></div>
+        </div>
+
+        <!-- Score Legend -->
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px;font-size:12px;color:var(--tx3)">
+          <span><span class="prosp-score-badge prosp-score-hot">🔥 70–100</span> Hot — weak digital presence</span>
+          <span><span class="prosp-score-badge prosp-score-warm">♨️ 40–69</span> Warm — some gaps</span>
+          <span><span class="prosp-score-badge prosp-score-cold">🧊 0–39</span> Cold — already marketed</span>
+        </div>
+
+        <!-- Search Results -->
+        <div class="card" id="prosp-results-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title" id="prosp-results-title">Search Results</div>
+          </div>
+          <div id="prosp-results"></div>
+        </div>
+
+        <!-- Prospects Pipeline -->
+        <div class="card">
+          <div class="card-hd">
+            <div class="card-title">💼 Prospects Pipeline</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="loadProspectPipeline()">↻ Refresh</button>
+              <button class="btn btn-sec btn-sm" onclick="exportProspects()">⬇ Export CSV</button>
+            </div>
+          </div>
+          <div id="prosp-pipeline-body"><p style="color:var(--tx3);font-size:13px">Loading…</p></div>
         </div>
       </div>
 

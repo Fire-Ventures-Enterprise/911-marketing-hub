@@ -29,7 +29,7 @@
 - **Name:** `911-marketing-hub-production`
 - **ID:** `04f5ae3a-2273-49e5-8927-e7dcfa0afac1`
 - **Binding:** `DB`
-- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`, `company_websites`, `data_permissions`, `competitors`, `competitor_intel`, `competitor_scans`
+- **Tables:** `leads`, `companies`, `domains`, `users`, `sessions`, `keywords`, `domain_registrations`, `lp_templates`, `domain_images`, `google_reviews`, `google_business_profiles`, `tenants`, `tenant_invitations`, `subscription_plans`, `company_websites`, `data_permissions`, `competitors`, `competitor_intel`, `competitor_scans`, `scraped_businesses`
 
 ### R2 Bucket
 - **Name:** `slm-hub-images`
@@ -304,6 +304,13 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **Porkbun Registry Sync bar hidden for company_admin**: `#porkbun-sync-bar` now has `class="super-nav"` — hidden by `_applyRoleNav` for all non-super_admin roles
 - **`loadCompanies()` explicit auth header**: added `Authorization: Bearer ${getStoredToken()}` to the fetch — more reliable than relying solely on cookie in all timing scenarios; prevents empty Reviews dropdown due to silent 401 failures
 - **`rvInit()` company_id comparison fix**: `allCompanies.find(c => c.id === currentUser.company_id)` can fail due to type mismatch (DB returns integer, JS might have string); fix: use `String(c.id) === String(currentUser.company_id)` for safe comparison; also rebuilds dropdown every time Reviews tab opens (not only when empty)
+- **Business Prospector built (2026-03-29)**: 3-source search (Google Places API `searchText`, SerpAPI `engine=google_maps`, website scraper); SLM Opportunity Score calculated at runtime (not stored in DB column); results persisted to `scraped_businesses` table; prospect pipeline in `scraped_businesses` with status workflow; CSV export via `GET /api/prospector/export`
+- **`scraped_businesses` has no UNIQUE constraint**: each search run inserts fresh records; duplicate check in `POST /api/prospector/save` uses `business_name + city` match to avoid double-saving; do NOT add `ON CONFLICT DO NOTHING` without adding a UNIQUE index first
+- **SLM Opportunity Score not stored in DB**: `slm_score` is calculated at runtime in `calcSlmScore()` using stored fields (`website_url`, `google_rating`, `google_review_count`, `facebook_url`, `instagram_url`, `linkedin_url`, `phone`, `email`); score must be recalculated whenever any of those fields change; never cache the score permanently
+- **`CITY_COORDS` lookup table**: 28 major Canadian + US cities mapped to lat/lng for Google Places API location bias; if city not in table, Places API still works but without coordinate bias
+- **Website scraping for prospector**: plain `fetch()` + regex with 8s timeout and 250KB HTML limit (same pattern as brand profile scraper); extracts email, Facebook, Instagram, LinkedIn; works for static/SSR sites; JS-heavy SPAs return limited data
+- **Prospector is super_admin only**: `🔭 Prospector` nav item has `class="super-nav"` and `style="display:none"` — `_applyRoleNav` shows it only for super_admin; all 6 backend endpoints require `super_admin` role
+- **`openOnboardModal(idx)`**: navigates to Tenants tab, opens invite modal, pre-fills name + email + notes from prospector result; relies on `showInviteModal()` being globally available
 
 ---
 
@@ -346,6 +353,46 @@ SerpAPI free plan: **250 searches/month**. Every search costs 1 credit. This bud
 **Scan cadence:** Scan every 14 days per competitor, not 7. Do not add cron jobs that scan all competitors automatically — this eats the budget. All scans are manual (user-initiated) unless explicitly scheduled by the super_admin.
 
 **SERPAPI_KEY secret:** Set via `echo "KEY" | npx wrangler pages secret put SERPAPI_KEY --project-name services-leads-marketing-hub` — then redeploy. Key type: `SERPAPI_KEY: string` in `Bindings`.
+
+---
+
+## BUSINESS PROSPECTOR DOCTRINE
+
+The Business Prospector (`🔭 Prospector`) is a super_admin-only lead generation tool that searches for businesses with weak digital presence and scores them by opportunity.
+
+**SLM Opportunity Score (0–100):**
+| Signal | Points |
+|--------|--------|
+| No website | +30 |
+| Google rating < 4.0 | +20 |
+| Google reviews < 10 | +15 |
+| No social media (no FB + no IG + no LinkedIn) | +15 |
+| Has phone but no email | +10 |
+
+**Tiers:**
+- 🔥 **Hot** (70–100): Weak digital presence, high opportunity — prioritise these
+- ♨️ **Warm** (40–69): Some gaps, worth contacting
+- 🧊 **Cold** (0–39): Already well-marketed — low priority
+
+**Score is calculated at runtime** from stored fields. It is not a DB column.
+
+**3-source search order:**
+1. Google Places API (`searchText`) — primary source, location-biased
+2. SerpAPI (`engine=google_maps`) — enrichment for businesses Places missed
+3. Website scraper (`fetch()` + regex) — runs on up to 10 results to extract email/social; respects 8s timeout + 250KB HTML cap
+
+**Prospect Pipeline workflow:**
+`new` → `contacted` → `qualified` → `converted` (or `lost`)
+
+**One-click actions from search results:**
+- **Save as Prospect**: stores to `scraped_businesses`, shows in Pipeline
+- **Add as Competitor**: stores to `competitors` table with SerpAPI scan pending
+- **Onboard Client**: navigates to Tenants tab, opens invite modal pre-filled with business name + email + notes
+
+**Data rules:**
+- Never display invented contact info — only show what was found via API or scrape
+- CSV export includes all prospect fields for outreach use
+- Searching does not require GDPR consent — only sending outreach emails does
 
 ---
 
