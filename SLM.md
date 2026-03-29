@@ -251,6 +251,14 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **`getStoredToken()` helper** reads `slm_token` from cookie for API calls within reviews JS — avoids duplicating auth logic
 - **Reviews endpoint auth**: `POST /api/reviews/search-business`, `POST /api/reviews/connect/:id`, `POST /api/reviews/sync/:id` require `super_admin` or `company_admin`; company_admin scoped to their own company_id; `GET /api/reviews/:company_id` requires any authenticated user
 - **`getLPReviews` fake review function kept** — still in codebase as fallback reference but never called from LP endpoint; remove in a future cleanup session
+- **`rvInit()` race condition**: `allCompanies` initialises as `[]` (empty array), which is truthy; guard `if (!allCompanies)` never fires; when Reviews tab is clicked before `loadCompanies()` resolves, the dropdown renders with zero options; fix: `if (!allCompanies.length) await loadCompanies()` at the top of `rvInit()`
+- **Role-based company selector in Reviews**: `company_admin` should see their own company pre-selected and the dropdown disabled; `super_admin`/`manager` see the full dropdown; always handle both cases in `rvInit()`; hide the all-companies overview card for `company_admin`
+- **Company Management tab**: `🏢 Companies` sidebar nav item is `super_admin`-only — hidden with `style="display:none"` on element, revealed after `checkAuth()` resolves when `currentUser.role === 'super_admin'`; use class `co-mgmt-nav` on both the `<div class="sb-group">` and the `<button>` so both show/hide together
+- **`POST /api/companies` + `PATCH /api/companies/:id`**: both require `super_admin`; validate `key` with regex `/^[a-z0-9-]+$/`; handle UNIQUE constraint violation → 409 with friendly message; `callouts` and `sitelinks` are JSON-stringified before storage, never raw arrays
+- **`loadCompanyMgmt()`**: fetches `GET /api/reviews` to get GBP status for each company, populates `_coMgmtProfiles` map keyed by `company_id`; renders company table with inline GBP status badge; calls `loadCompanies()` if `allCompanies` is empty (same race fix as `rvInit`)
+- **Inline GBP connect in edit form**: reuses same `POST /api/reviews/search-business` + `POST /api/reviews/connect/:id` endpoints as Reviews pane — no new API needed; tracks selected company via `_coInlineGbpCompanyId`; hides the section entirely in Add-Company form (no ID yet)
+- **`saveCompany()` refreshes global companies**: after create/update calls `await loadCompanies()` then `loadCompanyMgmt()` — keeps `allCompanies` in sync so LP generator dropdown, domain grouping, and Reviews selector are immediately up to date
+- **Color pickers sync both ways**: `<input type="color">` and `<input type="text">` are kept in sync via `oninput` cross-assignment — color picker updates text field and vice versa; both send the hex value to the API
 
 ---
 

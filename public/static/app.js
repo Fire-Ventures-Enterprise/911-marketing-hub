@@ -75,7 +75,8 @@ const SECTION_LABELS = {
   publish:   'Batch Publish',
   images:    'Image Library',
   reviews:   'Google Reviews',
-  leads:     'Inbound Leads'
+  leads:     'Inbound Leads',
+  companies: 'Company Management'
 };
 
 function showSection(id) {
@@ -90,11 +91,12 @@ function showSection(id) {
   const titleEl = document.getElementById('tb-title');
   if (titleEl) titleEl.textContent = SECTION_LABELS[id] || id;
 
-  if (id === 'leads')   loadLeads();
-  if (id === 'ads')     loadPushHistory();
-  if (id === 'publish') initPublishDomains();
-  if (id === 'images')  { loadTemplates(); loadImageLibrary(); _populateImageDomainSelect(); }
-  if (id === 'reviews') { rvInit(); }
+  if (id === 'leads')     loadLeads();
+  if (id === 'ads')       loadPushHistory();
+  if (id === 'publish')   initPublishDomains();
+  if (id === 'images')    { loadTemplates(); loadImageLibrary(); _populateImageDomainSelect(); }
+  if (id === 'reviews')   { rvInit(); }
+  if (id === 'companies') { loadCompanyMgmt(); }
 
   if (window.innerWidth <= 768) closeSidebar();
 }
@@ -1295,18 +1297,262 @@ function _populateImageDomainSelect() {
     allDomains.map(d => `<option value="${d.id}">${d.domain}</option>`).join('');
 }
 
+// ── COMPANY MANAGEMENT ────────────────────────────────────────────────────
+
+let _coMgmtProfiles = {}; // place_id keyed by company_id, populated on load
+
+async function loadCompanyMgmt() {
+  const tbody = document.getElementById('co-tbl-body');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" style="color:var(--tx3);text-align:center;padding:24px">Loading…</td></tr>';
+
+  // Ensure companies are loaded
+  if (!allCompanies.length) await loadCompanies();
+
+  // Fetch review profiles to show GBP status
+  let profiles = {};
+  try {
+    const r = await fetch('/api/reviews', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+    const d = await r.json();
+    if (d.profiles) d.profiles.forEach(p => { profiles[p.company_id] = p; });
+  } catch(_) {}
+  _coMgmtProfiles = profiles;
+
+  if (!allCompanies.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--tx3);text-align:center;padding:24px">No companies found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = allCompanies.map(co => {
+    const prof = profiles[co.id];
+    const gbpStatus = prof
+      ? `<span class="co-mgmt-status connected">✅ ${prof.business_name || 'Connected'}</span>`
+      : `<span class="co-mgmt-status no-profile">⚠️ Not Connected</span>`;
+    const budget = co.budget ? `$${Number(co.budget).toLocaleString()}` : '—';
+    const cpa    = co.target_cpa ? `$${co.target_cpa}` : '—';
+    return `<tr id="co-row-${co.id}">
+      <td><div class="co-tbl-name">${co.name}</div><div class="co-tbl-key">${co.key}</div></td>
+      <td>${co.phone || '<span style="color:var(--tx3)">—</span>'}</td>
+      <td>${co.domain || '<span style="color:var(--tx3)">—</span>'}</td>
+      <td>${budget} / ${cpa}</td>
+      <td>${gbpStatus}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sec btn-sm" onclick="editCompany(${co.id})">✏️ Edit</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function showAddCompany() {
+  document.getElementById('co-edit-id').value = '';
+  document.getElementById('co-form-title').textContent = 'Add Company';
+  document.getElementById('co-f-name').value = '';
+  document.getElementById('co-f-key').value = '';
+  document.getElementById('co-f-phone').value = '';
+  document.getElementById('co-f-domain').value = '';
+  document.getElementById('co-f-budget').value = '';
+  document.getElementById('co-f-cpa').value = '';
+  document.getElementById('co-f-color-bg').value = '#1e293b';
+  document.getElementById('co-f-color-bg-picker').value = '#1e293b';
+  document.getElementById('co-f-color-accent').value = '#3b82f6';
+  document.getElementById('co-f-color-accent-picker').value = '#3b82f6';
+  document.getElementById('co-f-callouts').value = '';
+  document.getElementById('co-f-sitelinks').value = '';
+  document.getElementById('co-inline-gbp').style.display = 'none';
+  document.getElementById('co-form-card').style.display = 'block';
+  document.getElementById('co-form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function hideCompanyForm() {
+  document.getElementById('co-form-card').style.display = 'none';
+}
+
+function editCompany(id) {
+  const co = allCompanies.find(c => c.id === id);
+  if (!co) return;
+  document.getElementById('co-edit-id').value = co.id;
+  document.getElementById('co-form-title').textContent = `Edit — ${co.name}`;
+  document.getElementById('co-f-name').value = co.name || '';
+  document.getElementById('co-f-key').value = co.key || '';
+  document.getElementById('co-f-phone').value = co.phone || '';
+  document.getElementById('co-f-domain').value = co.domain || '';
+  document.getElementById('co-f-budget').value = co.budget || '';
+  document.getElementById('co-f-cpa').value = co.target_cpa || '';
+  const bgColor = co.color_bg || '#1e293b';
+  const acColor = co.color_accent || '#3b82f6';
+  document.getElementById('co-f-color-bg').value = bgColor;
+  document.getElementById('co-f-color-bg-picker').value = bgColor;
+  document.getElementById('co-f-color-accent').value = acColor;
+  document.getElementById('co-f-color-accent-picker').value = acColor;
+  // Parse callouts / sitelinks — stored as JSON string in D1
+  try { document.getElementById('co-f-callouts').value = co.callouts ? JSON.stringify(JSON.parse(co.callouts)) : ''; } catch(_) { document.getElementById('co-f-callouts').value = co.callouts || ''; }
+  try { document.getElementById('co-f-sitelinks').value = co.sitelinks ? JSON.stringify(JSON.parse(co.sitelinks)) : ''; } catch(_) { document.getElementById('co-f-sitelinks').value = co.sitelinks || ''; }
+
+  // Show inline GBP section for existing company
+  const gbpSection = document.getElementById('co-inline-gbp');
+  gbpSection.style.display = 'block';
+  _coLoadInlineGbp(id);
+
+  document.getElementById('co-form-card').style.display = 'block';
+  document.getElementById('co-form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function saveCompany() {
+  const id       = document.getElementById('co-edit-id').value;
+  const name     = document.getElementById('co-f-name').value.trim();
+  const key      = document.getElementById('co-f-key').value.trim().toLowerCase();
+  const phone    = document.getElementById('co-f-phone').value.trim();
+  const domain   = document.getElementById('co-f-domain').value.trim();
+  const budget   = document.getElementById('co-f-budget').value.trim();
+  const cpa      = document.getElementById('co-f-cpa').value.trim();
+  const color_bg     = document.getElementById('co-f-color-bg').value.trim();
+  const color_accent = document.getElementById('co-f-color-accent').value.trim();
+
+  if (!name || !key) { toast('Name and key are required', 'error'); return; }
+  if (!/^[a-z0-9-]+$/.test(key)) { toast('Key must be lowercase letters, numbers, hyphens only', 'error'); return; }
+
+  let callouts = [];
+  let sitelinks = [];
+  try { const raw = document.getElementById('co-f-callouts').value.trim(); if (raw) callouts = JSON.parse(raw); } catch(_) { toast('Callouts must be valid JSON array', 'error'); return; }
+  try { const raw = document.getElementById('co-f-sitelinks').value.trim(); if (raw) sitelinks = JSON.parse(raw); } catch(_) { toast('Sitelinks must be valid JSON array', 'error'); return; }
+
+  const body = { key, name, phone: phone || null, domain: domain || null,
+    budget: budget ? Number(budget) : null, target_cpa: cpa ? Number(cpa) : null,
+    color_bg: color_bg || '#1e293b', color_accent: color_accent || '#3b82f6',
+    callouts, sitelinks };
+
+  const url    = id ? `/api/companies/${id}` : '/api/companies';
+  const method = id ? 'PATCH' : 'POST';
+
+  const r = await fetch(url, {
+    method, headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (!r.ok) { toast(d.error || 'Save failed', 'error'); return; }
+
+  toast(id ? 'Company updated ✓' : 'Company created ✓', 'success');
+  hideCompanyForm();
+  // Refresh global companies list and table
+  await loadCompanies();
+  loadCompanyMgmt();
+}
+
+// Inline GBP helpers for the edit form
+let _coInlineGbpCompanyId = null;
+
+async function _coLoadInlineGbp(companyId) {
+  _coInlineGbpCompanyId = companyId;
+  const statusEl  = document.getElementById('co-gbp-status');
+  const syncBtn   = document.getElementById('co-gbp-sync-btn');
+  const resultsEl = document.getElementById('co-gbp-results');
+  resultsEl.style.display = 'none';
+  syncBtn.style.display = 'none';
+  statusEl.textContent = 'Loading…';
+
+  const r = await fetch(`/api/reviews/${companyId}`, { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
+  const d = await r.json();
+
+  if (d.profile) {
+    const lastSync = d.profile.last_synced ? new Date(d.profile.last_synced).toLocaleString() : 'Never';
+    statusEl.innerHTML = `<span style="color:#4ade80;font-weight:700">✅ Connected:</span> <strong>${d.profile.business_name}</strong> &nbsp;·&nbsp; ⭐ ${d.profile.average_rating || '—'} &nbsp;·&nbsp; ${d.profile.total_reviews || 0} reviews &nbsp;·&nbsp; <span style="color:var(--tx3)">Last sync: ${lastSync}</span>`;
+    syncBtn.style.display = 'inline-flex';
+  } else {
+    statusEl.innerHTML = `<span style="color:#F59E0B">⚠️ No Google Business Profile connected.</span> Search below to find and connect.`;
+  }
+}
+
+async function coGbpSearch() {
+  if (!_coInlineGbpCompanyId) { toast('Save the company first', 'error'); return; }
+  const query = document.getElementById('co-gbp-search-input').value.trim();
+  if (!query) return;
+  const resultsEl = document.getElementById('co-gbp-results');
+  resultsEl.style.display = 'block';
+  resultsEl.innerHTML = '<div style="color:var(--tx3);font-size:13px">Searching…</div>';
+
+  const r = await fetch('/api/reviews/search-business', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ query })
+  });
+  const d = await r.json();
+  if (!d.results?.length) { resultsEl.innerHTML = '<div style="color:var(--tx3);font-size:13px">No results found.</div>'; return; }
+
+  resultsEl.innerHTML = d.results.map((p, i) => `
+    <div class="rv-search-result" style="margin-bottom:8px">
+      <div class="rv-search-name">${p.name}</div>
+      <div class="rv-search-addr">${p.address || ''}</div>
+      <div class="rv-search-rating">${p.rating ? `⭐ ${p.rating} (${p.total_reviews || 0} reviews)` : ''}</div>
+      <button class="btn btn-green btn-sm" style="margin-top:8px" onclick="coGbpConnect(${JSON.stringify(p).replace(/"/g,'&quot;')})">✓ Connect This Profile</button>
+    </div>`).join('<hr style="border-color:var(--bd);margin:8px 0">');
+}
+
+async function coGbpConnect(place) {
+  if (!_coInlineGbpCompanyId) return;
+  const r = await fetch(`/api/reviews/connect/${_coInlineGbpCompanyId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+    body: JSON.stringify({ place_id: place.place_id, business_name: place.name, average_rating: place.rating, total_reviews: place.total_reviews, profile_url: place.maps_url })
+  });
+  const d = await r.json();
+  if (d.success) {
+    toast('Google Business Profile connected ✓', 'success');
+    _coLoadInlineGbp(_coInlineGbpCompanyId);
+    document.getElementById('co-gbp-results').style.display = 'none';
+    loadCompanyMgmt();
+  } else {
+    toast(d.error || 'Connect failed', 'error');
+  }
+}
+
+async function coGbpSync() {
+  if (!_coInlineGbpCompanyId) return;
+  const syncStatus = document.getElementById('co-gbp-sync-status');
+  if (syncStatus) syncStatus.textContent = 'Syncing…';
+  const r = await fetch(`/api/reviews/sync/${_coInlineGbpCompanyId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` }
+  });
+  const d = await r.json();
+  if (syncStatus) syncStatus.textContent = '';
+  if (d.synced !== undefined) {
+    toast(`Synced ${d.synced} reviews ✓`, 'success');
+    _coLoadInlineGbp(_coInlineGbpCompanyId);
+  } else {
+    toast(d.error || 'Sync failed', 'error');
+  }
+}
+
 // ── GOOGLE REVIEWS ────────────────────────────────────────────────────────
 
 let _rvSelectedCompanyId = null;
 
 async function rvInit() {
-  // Populate company selector
+  // Race condition fix: wait for companies to load if not yet available
+  if (!allCompanies.length) await loadCompanies();
+
   const sel = document.getElementById('rv-company-sel');
-  if (!sel || !allCompanies) return;
-  sel.innerHTML = '<option value="">— Select Company —</option>' +
-    allCompanies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-  // Load overview table (super_admin sees all)
-  rvLoadOverview();
+  if (!sel) return;
+
+  if (currentUser?.role === 'company_admin') {
+    // company_admin sees only their own company — pre-select and lock
+    const ownCo = allCompanies.find(c => c.id === currentUser.company_id);
+    if (ownCo) {
+      sel.innerHTML = `<option value="${ownCo.id}">${ownCo.name}</option>`;
+      sel.disabled = true;
+      _rvSelectedCompanyId = String(ownCo.id);
+      rvLoadProfile();
+    } else {
+      sel.innerHTML = '<option value="">— No company assigned —</option>';
+      sel.disabled = true;
+    }
+    // Hide overview table for company_admin (it shows all companies)
+    const overviewCard = document.getElementById('rv-overview-card');
+    if (overviewCard) overviewCard.style.display = 'none';
+  } else {
+    // super_admin / manager — show full dropdown
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">— Select Company —</option>' +
+      allCompanies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    rvLoadOverview();
+  }
 }
 
 async function rvLoadProfile() {

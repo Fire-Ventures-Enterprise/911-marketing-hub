@@ -620,6 +620,25 @@
       .content { padding: 16px; }
       .co-grid { grid-template-columns: 1fr; }
     }
+
+    /* ── COMPANY MANAGEMENT ── */
+    .co-mgmt-status { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:700; }
+    .co-mgmt-status.connected { background:rgba(74,222,128,.12); color:#4ade80; border:1px solid rgba(74,222,128,.3); }
+    .co-mgmt-status.no-profile { background:rgba(245,158,11,.12); color:#F59E0B; border:1px solid rgba(245,158,11,.3); }
+    .co-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+    .co-form-grid .ff-full { grid-column: 1 / -1; }
+    .co-color-row { display:flex; align-items:center; gap:8px; }
+    .co-color-row input[type=color] { width:38px; height:32px; padding:1px 2px; border-radius:6px; border:1px solid var(--bd); background:var(--bg-in); cursor:pointer; }
+    .co-color-row input[type=text] { flex:1; }
+    .co-inline-gbp { border:1px solid var(--bd); border-radius:8px; padding:14px; margin-top:12px; background:var(--bg-s); }
+    .co-inline-gbp-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--tx3); margin-bottom:10px; }
+    .btn-sm { padding:5px 12px; font-size:12px; }
+    .btn-danger { background:rgba(248,113,113,.12); color:#f87171; border:1px solid rgba(248,113,113,.3); }
+    .btn-danger:hover { background:#CC0000; color:#fff; border-color:#CC0000; }
+    .co-tbl-name { font-weight:700; color:var(--tx); }
+    .co-tbl-key { font-family:'Courier New',monospace; font-size:11px; color:var(--tx3); margin-top:2px; }
+    .co-edit-row { background:rgba(96,165,250,.04); }
+    .co-edit-form { padding:18px; border-top:1px solid var(--bd); }
   </style>
 </head>
 <body>
@@ -671,6 +690,11 @@
       <div class="sb-group">CRM</div>
       <button class="nav-item" data-section="leads" onclick="showSection('leads')">
         <span class="nav-icon">📋</span><span>Leads</span>
+      </button>
+
+      <div class="sb-group co-mgmt-nav" style="display:none">Admin</div>
+      <button class="nav-item co-mgmt-nav" data-section="companies" onclick="showSection('companies')" style="display:none">
+        <span class="nav-icon">🏢</span><span>Companies</span>
       </button>
     </nav>
 
@@ -1211,6 +1235,118 @@
         </div>
       </div>
 
+      <!-- COMPANIES (super_admin only) -->
+      <div class="pane" id="pane-companies">
+        <div class="ph"><h2>🏢 Company Management</h2><p>Add, edit and configure companies. Connect Google Business Profiles per company.</p></div>
+
+        <!-- Company list -->
+        <div class="card" id="co-list-card">
+          <div class="card-hd">
+            <div class="card-title">All Companies</div>
+            <div class="card-actions" style="display:flex;gap:8px">
+              <button class="btn btn-sec btn-sm" onclick="loadCompanyMgmt()">↻ Refresh</button>
+              <button class="btn btn-primary btn-sm" onclick="showAddCompany()">+ Add Company</button>
+            </div>
+          </div>
+          <div class="tbl-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Company</th>
+                  <th>Phone</th>
+                  <th>Domain</th>
+                  <th>Budget / CPA</th>
+                  <th>Google Profile</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="co-tbl-body">
+                <tr><td colspan="6" style="color:var(--tx3);text-align:center;padding:24px">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Add / Edit Company Form -->
+        <div class="card" id="co-form-card" style="display:none">
+          <div class="card-hd">
+            <div class="card-title" id="co-form-title">Add Company</div>
+            <div class="card-actions">
+              <button class="btn btn-sec btn-sm" onclick="hideCompanyForm()">✕ Cancel</button>
+            </div>
+          </div>
+
+          <input type="hidden" id="co-edit-id" value="">
+
+          <div class="co-form-grid">
+            <div class="ff">
+              <label>Company Name *</label>
+              <input type="text" id="co-f-name" placeholder="e.g. 911 Restoration Ottawa">
+            </div>
+            <div class="ff">
+              <label>Key * <span style="font-size:10px;color:var(--tx3)">(lowercase, hyphens only)</span></label>
+              <input type="text" id="co-f-key" placeholder="e.g. 911-restoration-ottawa">
+            </div>
+            <div class="ff">
+              <label>Phone</label>
+              <input type="text" id="co-f-phone" placeholder="e.g. (613) 555-0100">
+            </div>
+            <div class="ff">
+              <label>Primary Domain</label>
+              <input type="text" id="co-f-domain" placeholder="e.g. 911restoration-ottawa.ca">
+            </div>
+            <div class="ff">
+              <label>Monthly Budget ($)</label>
+              <input type="text" id="co-f-budget" placeholder="e.g. 3000">
+            </div>
+            <div class="ff">
+              <label>Target CPA ($)</label>
+              <input type="text" id="co-f-cpa" placeholder="e.g. 150">
+            </div>
+            <div class="ff">
+              <label>Background Color</label>
+              <div class="co-color-row">
+                <input type="color" id="co-f-color-bg-picker" value="#1e293b" oninput="document.getElementById('co-f-color-bg').value=this.value">
+                <input type="text" id="co-f-color-bg" value="#1e293b" placeholder="#1e293b" oninput="document.getElementById('co-f-color-bg-picker').value=this.value">
+              </div>
+            </div>
+            <div class="ff">
+              <label>Accent Color</label>
+              <div class="co-color-row">
+                <input type="color" id="co-f-color-accent-picker" value="#3b82f6" oninput="document.getElementById('co-f-color-accent').value=this.value">
+                <input type="text" id="co-f-color-accent" value="#3b82f6" placeholder="#3b82f6" oninput="document.getElementById('co-f-color-accent-picker').value=this.value">
+              </div>
+            </div>
+            <div class="ff ff-full">
+              <label>Callouts <span style="font-size:10px;color:var(--tx3)">(JSON array, e.g. ["24/7 Service","Free Estimate"])</span></label>
+              <input type="text" id="co-f-callouts" placeholder='["24/7 Service","Free Estimate","Licensed & Insured"]'>
+            </div>
+            <div class="ff ff-full">
+              <label>Sitelinks <span style="font-size:10px;color:var(--tx3)">(JSON array of {text,url})</span></label>
+              <input type="text" id="co-f-sitelinks" placeholder='[{"text":"Emergency","url":"/emergency"},{"text":"Contact","url":"/contact"}]'>
+            </div>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-primary" onclick="saveCompany()">💾 Save Company</button>
+            <button class="btn btn-sec" onclick="hideCompanyForm()">Cancel</button>
+          </div>
+
+          <!-- Inline Google Business Profile connect (only visible when editing existing company) -->
+          <div class="co-inline-gbp" id="co-inline-gbp" style="display:none">
+            <div class="co-inline-gbp-title">Google Business Profile</div>
+            <div id="co-gbp-status" style="margin-bottom:10px;font-size:13px;color:var(--tx3)">Loading…</div>
+            <div style="display:flex;gap:8px;margin-bottom:10px">
+              <input type="text" id="co-gbp-search-input" placeholder="Search business name + city…" style="flex:1">
+              <button class="btn btn-sec btn-sm" onclick="coGbpSearch()">🔍 Search</button>
+            </div>
+            <div id="co-gbp-results" style="display:none;margin-bottom:10px"></div>
+            <button class="btn btn-amber btn-sm" id="co-gbp-sync-btn" style="display:none" onclick="coGbpSync()">↻ Sync Reviews Now</button>
+            <span id="co-gbp-sync-status" style="font-size:12px;color:var(--tx3);margin-left:8px"></span>
+          </div>
+        </div>
+      </div>
+
     </div><!-- /content -->
   </div><!-- /main-wrap -->
 </div><!-- /layout -->
@@ -1224,6 +1360,10 @@
     loadDomains();
     loadCompanies();
     checkGoogleAuth();
+    // Show Companies nav for super_admin only
+    if (currentUser && currentUser.role === 'super_admin') {
+      document.querySelectorAll('.co-mgmt-nav').forEach(el => el.style.display = '');
+    }
   });
 </script>
 </body>

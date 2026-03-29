@@ -1237,6 +1237,71 @@ app.get('/api/companies', async (c) => {
   return c.json({ companies: result.results || [] })
 })
 
+app.post('/api/companies', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const body = await c.req.json()
+  const { key, name, phone, domain, budget, target_cpa, color_bg, color_accent, callouts, sitelinks } = body
+  if (!key || !name) return c.json({ error: 'key and name are required' }, 400)
+  // Validate key format: lowercase letters, numbers, hyphens only
+  if (!/^[a-z0-9-]+$/.test(key)) return c.json({ error: 'key must be lowercase letters, numbers, and hyphens only' }, 400)
+  try {
+    const res = await c.env.DB.prepare(
+      `INSERT INTO companies (key, name, phone, domain, budget, target_cpa, color_bg, color_accent, callouts, sitelinks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      key.trim(),
+      name.trim(),
+      phone?.trim() || null,
+      domain?.trim() || null,
+      budget ? Number(budget) : null,
+      target_cpa ? Number(target_cpa) : null,
+      color_bg?.trim() || '#1e293b',
+      color_accent?.trim() || '#3b82f6',
+      callouts ? JSON.stringify(callouts) : '[]',
+      sitelinks ? JSON.stringify(sitelinks) : '[]'
+    ).run()
+    return c.json({ success: true, id: res.meta?.last_row_id })
+  } catch (e: any) {
+    if (e?.message?.includes('UNIQUE')) return c.json({ error: `Company key "${key}" already exists` }, 409)
+    return c.json({ error: 'Failed to create company' }, 500)
+  }
+})
+
+app.patch('/api/companies/:id', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.DB) return c.json({ error: 'DB unavailable' }, 500)
+  const id = Number(c.req.param('id'))
+  if (!id) return c.json({ error: 'Invalid company id' }, 400)
+  const body = await c.req.json()
+  const { key, name, phone, domain, budget, target_cpa, color_bg, color_accent, callouts, sitelinks } = body
+  if (!key || !name) return c.json({ error: 'key and name are required' }, 400)
+  if (!/^[a-z0-9-]+$/.test(key)) return c.json({ error: 'key must be lowercase letters, numbers, and hyphens only' }, 400)
+  try {
+    await c.env.DB.prepare(
+      `UPDATE companies SET key=?, name=?, phone=?, domain=?, budget=?, target_cpa=?, color_bg=?, color_accent=?, callouts=?, sitelinks=? WHERE id=?`
+    ).bind(
+      key.trim(),
+      name.trim(),
+      phone?.trim() || null,
+      domain?.trim() || null,
+      budget ? Number(budget) : null,
+      target_cpa ? Number(target_cpa) : null,
+      color_bg?.trim() || '#1e293b',
+      color_accent?.trim() || '#3b82f6',
+      callouts ? JSON.stringify(callouts) : '[]',
+      sitelinks ? JSON.stringify(sitelinks) : '[]',
+      id
+    ).run()
+    return c.json({ success: true })
+  } catch (e: any) {
+    if (e?.message?.includes('UNIQUE')) return c.json({ error: `Company key "${key}" already exists` }, 409)
+    return c.json({ error: 'Failed to update company' }, 500)
+  }
+})
+
 // ── LP CHECKLIST VALIDATOR ────────────────────────────────────────────────────
 function validateLP(html: string, mode: 'ppc' | 'seo'): { passed: string[]; warnings: string[] } {
   const passed: string[]   = []
