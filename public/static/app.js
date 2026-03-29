@@ -181,7 +181,7 @@ function closeSidebar() {
 
 async function loadCompanies() {
   try {
-    const r = await fetch('/api/companies');
+    const r = await fetch('/api/companies', { headers: { Authorization: `Bearer ${getStoredToken()}` } });
     const { companies } = await r.json();
     allCompanies = companies || [];
     _populateCompanySelects();
@@ -1583,7 +1583,7 @@ async function coGbpSync() {
 let _rvSelectedCompanyId = null;
 
 async function rvInit() {
-  // Race condition fix: wait for companies to load if not yet available
+  // Always ensure companies are loaded before rendering the dropdown
   if (!allCompanies.length) await loadCompanies();
 
   const sel = document.getElementById('rv-company-sel');
@@ -1591,7 +1591,7 @@ async function rvInit() {
 
   if (currentUser?.role === 'company_admin') {
     // company_admin sees only their own company — pre-select and lock
-    const ownCo = allCompanies.find(c => c.id === currentUser.company_id);
+    const ownCo = allCompanies.find(c => String(c.id) === String(currentUser.company_id));
     if (ownCo) {
       sel.innerHTML = `<option value="${ownCo.id}">${ownCo.name}</option>`;
       sel.disabled = true;
@@ -1605,10 +1605,14 @@ async function rvInit() {
     const overviewCard = document.getElementById('rv-overview-card');
     if (overviewCard) overviewCard.style.display = 'none';
   } else {
-    // super_admin / manager — show full dropdown
+    // super_admin / manager — rebuild the full dropdown every time the tab opens
     sel.disabled = false;
-    sel.innerHTML = '<option value="">— Select Company —</option>' +
-      allCompanies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    if (allCompanies.length) {
+      sel.innerHTML = '<option value="">— Select Company —</option>' +
+        allCompanies.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    } else {
+      sel.innerHTML = '<option value="">— No companies found —</option>';
+    }
     rvLoadOverview();
   }
 }
@@ -1950,24 +1954,36 @@ async function saveTenantDetail(id) {
 }
 
 async function showInviteModal() {
-  // Load plans if not yet loaded
+  const card = document.getElementById('tn-invite-card');
+  if (!card) return;
+
+  // Show the modal IMMEDIATELY — never block on async plan loading
+  ['tn-f-name','tn-f-email','tn-f-fee','tn-f-maxd','tn-f-maxu','tn-f-notes'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const resEl = document.getElementById('tn-invite-result');
+  const errEl = document.getElementById('tn-invite-error');
+  if (resEl) resEl.style.display = 'none';
+  if (errEl) errEl.style.display = 'none';
+  card.style.display = 'block';
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Load subscription plans async (modal is already visible)
   if (!_tnPlans.length) {
-    const r = await fetch('/api/subscription-plans');
-    const d = await r.json();
-    _tnPlans = d.plans || [];
-    const sel = document.getElementById('tn-f-plan');
-    if (sel) sel.innerHTML = '<option value="">— Select Plan —</option>' + _tnPlans.map(p => `<option value="${p.name.toLowerCase()}" data-fee="${p.price_monthly}" data-maxd="${p.max_domains}" data-maxu="${p.max_users}">${p.name} — $${p.price_monthly}/mo</option>`).join('');
+    try {
+      const r = await fetch('/api/subscription-plans');
+      const d = await r.json();
+      _tnPlans = d.plans || [];
+      const sel = document.getElementById('tn-f-plan');
+      if (sel && _tnPlans.length) {
+        sel.innerHTML = '<option value="">— Select Plan —</option>' +
+          _tnPlans.map(p => `<option value="${p.name.toLowerCase()}" data-fee="${p.price_monthly}" data-maxd="${p.max_domains}" data-maxu="${p.max_users}">${p.name} — $${p.price_monthly}/mo</option>`).join('');
+      }
+    } catch (e) {
+      const sel = document.getElementById('tn-f-plan');
+      if (sel) sel.innerHTML = '<option value="">— Could not load plans —</option>';
+    }
   }
-  document.getElementById('tn-f-name').value = '';
-  document.getElementById('tn-f-email').value = '';
-  document.getElementById('tn-f-fee').value = '';
-  document.getElementById('tn-f-maxd').value = '';
-  document.getElementById('tn-f-maxu').value = '';
-  document.getElementById('tn-f-notes').value = '';
-  document.getElementById('tn-invite-result').style.display = 'none';
-  document.getElementById('tn-invite-error').style.display = 'none';
-  document.getElementById('tn-invite-card').style.display = 'block';
-  document.getElementById('tn-invite-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function hideInviteModal() {

@@ -887,7 +887,7 @@ app.use('/api/*', async (c, next) => {
   const token = getToken(c)
   if (!token) return c.json({ error: 'Unauthorized' }, 401)
   const session = await c.env.DB.prepare(
-    'SELECT s.token as tok, u.id, u.email, u.role, u.company_id, u.name, u.active, co.key as company_key FROM sessions s JOIN users u ON s.user_id = u.id LEFT JOIN companies co ON u.company_id = co.id WHERE s.token = ? AND s.expires_at > ?'
+    'SELECT s.token as tok, u.id, u.email, u.role, u.company_id, u.name, u.active, COALESCE(co.key, tn.company_key) as company_key FROM sessions s JOIN users u ON s.user_id = u.id LEFT JOIN companies co ON u.company_id = co.id LEFT JOIN tenants tn ON (u.company_id = tn.id AND co.id IS NULL) WHERE s.token = ? AND s.expires_at > ?'
   ).bind(token, new Date().toISOString()).first() as any
   if (!session || !session.active) return c.json({ error: 'Unauthorized' }, 401)
   c.set('user', { id: session.id, email: session.email, role: session.role, company_id: session.company_id, name: session.name, company_key: session.company_key })
@@ -1186,6 +1186,9 @@ app.get('/api/domains', async (c) => {
   let result
   if (user && user.role !== 'super_admin' && user.company_key) {
     result = await c.env.DB.prepare(base + ' WHERE company = ? ORDER BY authorized DESC, priority ASC, domain ASC').bind(user.company_key).all()
+  } else if (user && user.role !== 'super_admin') {
+    // Authenticated non-super_admin with no resolved company_key (new tenant, no domains yet)
+    return c.json({ total: 0, domains: [] })
   } else {
     result = await c.env.DB.prepare(base + ' ORDER BY authorized DESC, category ASC, priority ASC, domain ASC').all()
   }
@@ -2583,7 +2586,7 @@ app.get('/api/tenants', async (c) => {
   try {
     const res = await c.env.DB.prepare(`
       SELECT t.*,
-        (SELECT COUNT(*) FROM domains d WHERE d.company_id = t.id) AS domain_count,
+        (SELECT COUNT(*) FROM domains d WHERE d.company = t.company_key) AS domain_count,
         (SELECT COUNT(*) FROM users u WHERE u.company_id = t.id AND u.active = 1) AS user_count
       FROM tenants t ORDER BY t.created_at DESC
     `).all()
@@ -2697,7 +2700,7 @@ app.get('/api/tenants/:id', async (c) => {
     const [tenant, invitations, members] = await Promise.all([
       c.env.DB.prepare(`
         SELECT t.*,
-          (SELECT COUNT(*) FROM domains d WHERE d.company_id = t.id) AS domain_count,
+          (SELECT COUNT(*) FROM domains d WHERE d.company = t.company_key) AS domain_count,
           (SELECT COUNT(*) FROM users u WHERE u.company_id = t.id AND u.active = 1) AS user_count,
           (SELECT COUNT(*) FROM google_business_profiles gbp WHERE gbp.company_id = t.id) AS gbp_count
         FROM tenants t WHERE t.id = ?`).bind(id).first(),

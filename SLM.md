@@ -296,6 +296,14 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **`normDomain()` helper**: strips protocol, `www.`, and path from URL for domain matching in SerpAPI results
 - **`findDomainInResults()` helper**: checks if competitor domain appears in SerpAPI ads or organic results; returns 1-based position or null
 - **Intel pane**: `pane-intel` with budget meter, Add Competitor form, competitor list (with Scan + Results buttons), Scan Results panel; `'intel'` added to `generatorSections` so staff can't see it; `SECTION_LABELS` entry added; `_esc()` HTML escape helper added for safe rendering of competitor names/domains
+- **`GET /api/tenants` SQL bug**: `domains` table has NO `company_id` column — using `d.company_id = t.id` in the tenant stats subquery causes `SQLITE_ERROR: no such column` and crashes the entire Tenants page; fix: use `d.company = t.company_key` instead (domains use text key, not integer FK)
+- **Auth query extended for tenant users**: original `LEFT JOIN companies co ON u.company_id = co.id` returns null `company_key` for new tenant users (whose `company_id` points to `tenants.id`, not `companies.id`); fix: add `LEFT JOIN tenants tn ON (u.company_id = tn.id AND co.id IS NULL)` with `COALESCE(co.key, tn.company_key)` — the `AND co.id IS NULL` guard prevents ID collision between `companies` and `tenants` tables
+- **`GET /api/domains` null company_key guard**: when a non-super_admin user has `company_key = null` (new tenant with no company entry), return `{ total: 0, domains: [] }` instead of falling through to the unfiltered super_admin query which would expose all 33 domains
+- **`showInviteModal()` async bug**: modal was shown AFTER `await fetch('/api/subscription-plans')` — if the fetch is slow or fails, the modal never appears; fix: show modal FIRST (synchronously), then load plans async with try/catch in the background
+- **Domain filter tabs — category tabs hidden for company_admin**: Restoration/Renovation/Kitchen filter tabs have `class="super-nav"` and `style="display:none"` — `_applyRoleNav` shows them only for super_admin; company_admin sees only All/Active/Building/Parked/Pending tabs
+- **Porkbun Registry Sync bar hidden for company_admin**: `#porkbun-sync-bar` now has `class="super-nav"` — hidden by `_applyRoleNav` for all non-super_admin roles
+- **`loadCompanies()` explicit auth header**: added `Authorization: Bearer ${getStoredToken()}` to the fetch — more reliable than relying solely on cookie in all timing scenarios; prevents empty Reviews dropdown due to silent 401 failures
+- **`rvInit()` company_id comparison fix**: `allCompanies.find(c => c.id === currentUser.company_id)` can fail due to type mismatch (DB returns integer, JS might have string); fix: use `String(c.id) === String(currentUser.company_id)` for safe comparison; also rebuilds dropdown every time Reviews tab opens (not only when empty)
 
 ---
 

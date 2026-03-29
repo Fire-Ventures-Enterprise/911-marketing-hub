@@ -937,9 +937,9 @@
         <div class="ph"><h2>Domain Army</h2><p>Click any row to pre-fill the generators</p></div>
         <div class="filter-row">
           <button class="ftab active" onclick="filterDomains('all',this)">All</button>
-          <button class="ftab" onclick="filterDomains('emergency',this)">🚨 Restoration</button>
-          <button class="ftab" onclick="filterDomains('renovation',this)">🔨 Renovation</button>
-          <button class="ftab" onclick="filterDomains('kitchen',this)">🍳 Kitchen</button>
+          <button class="ftab super-nav" onclick="filterDomains('emergency',this)" style="display:none">🚨 Restoration</button>
+          <button class="ftab super-nav" onclick="filterDomains('renovation',this)" style="display:none">🔨 Renovation</button>
+          <button class="ftab super-nav" onclick="filterDomains('kitchen',this)" style="display:none">🍳 Kitchen</button>
           <button class="ftab" onclick="filterDomains('Active',this)">Active</button>
           <button class="ftab" onclick="filterDomains('Building',this)">Building</button>
           <button class="ftab" onclick="filterDomains('Parked',this)">Parked</button>
@@ -952,8 +952,8 @@
           </table>
         </div>
 
-        <!-- Porkbun Registry Sync -->
-        <div class="card" style="margin-top:20px" id="porkbun-sync-bar">
+        <!-- Porkbun Registry Sync — super_admin only -->
+        <div class="card super-nav" style="margin-top:20px;display:none" id="porkbun-sync-bar">
           <div class="card-hd">
             <div class="card-title">🌐 Porkbun Registry Sync</div>
             <div class="card-actions">
