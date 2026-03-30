@@ -16,6 +16,8 @@ type Bindings = {
   GOOGLE_PLACES_API_KEY: string
   ANTHROPIC_API_KEY: string
   SERPAPI_KEY: string
+  CLOUDFLARE_API_TOKEN: string
+  CLOUDFLARE_ACCOUNT_ID: string
 }
 // Real review row from google_reviews D1 table
 type ReviewRow = {
@@ -2021,6 +2023,10 @@ app.post('/api/porkbun/import-all', async (c) => {
   if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) return c.json({ error: 'Porkbun credentials not configured' }, 503)
   if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
 
+  // Optional: if { selected: [...domains] } supplied, only import those (for Import modal selective import)
+  const body = await c.req.json().catch(() => ({})) as { selected?: string[] }
+  const selectedFilter = body.selected && body.selected.length > 0 ? new Set(body.selected) : null
+
   try {
     // Fetch all domains — paginate in batches of 1000
     let allPb: any[] = []
@@ -2033,6 +2039,8 @@ app.post('/api/porkbun/import-all', async (c) => {
       if (batch.length < 1000) break
       start += 1000
     }
+    // Filter to selected domains if specified
+    if (selectedFilter) allPb = allPb.filter((d: any) => selectedFilter.has(d.domain))
 
     const now = new Date().toISOString()
 
@@ -2204,6 +2212,135 @@ app.get('/api/porkbun/expiry-alerts', async (c) => {
   } catch (err: any) {
     return c.json({ error: 'Expiry check failed', detail: err?.message }, 500)
   }
+})
+
+// POST /api/domains/check-availability — single domain availability check via Porkbun (super_admin only)
+app.post('/api/domains/check-availability', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) return c.json({ error: 'Porkbun credentials not configured' }, 503)
+  const { domain } = await c.req.json() as { domain: string }
+  if (!domain) return c.json({ error: 'domain required' }, 400)
+  try {
+    const data = await porkbunPost(c.env, `/domain/checkDomain/${domain}`)
+    // Mirror porkbun/check response structure so frontend can reuse same renderer
+    return c.json({ results: [{ domain, status: data.status, response: data }] })
+  } catch (err: any) {
+    return c.json({ error: 'Check failed', detail: err?.message }, 500)
+  }
+})
+
+// GET /api/porkbun/fetch-list — list all Porkbun domains with D1 diff tags (no import, super_admin only)
+app.get('/api/porkbun/fetch-list', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) return c.json({ error: 'Porkbun credentials not configured' }, 503)
+  if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
+  try {
+    const [pbData, existingRes] = await Promise.all([
+      porkbunPost(c.env, '/domain/listAll', { includeLabels: 'yes' }),
+      c.env.DB.prepare('SELECT domain FROM domain_registrations').all()
+    ])
+    if (pbData.status !== 'SUCCESS') return c.json({ error: 'Porkbun API error', detail: pbData.message }, 502)
+    const existingSet = new Set((existingRes.results || []).map((r: any) => r.domain))
+    const domains = (pbData.domains || []).map((d: any) => ({
+      domain:     d.domain,
+      expiry:     d.expireDate ? d.expireDate.split(' ')[0] : null,
+      autorenew:  d.autoRenew === '1' ? 1 : 0,
+      status:     d.status || 'ACTIVE',
+      in_d1:      existingSet.has(d.domain)
+    }))
+    const new_count = domains.filter((d: any) => !d.in_d1).length
+    return c.json({ total: domains.length, new_count, domains })
+  } catch (err: any) {
+    return c.json({ error: 'Fetch failed', detail: err?.message }, 500)
+  }
+})
+
+// POST /api/domains/buy — full domain purchase: register + DNS CNAME + CF Pages + D1 (super_admin only)
+app.post('/api/domains/buy', async (c) => {
+  const user = c.get('user')
+  if (!user || user.role !== 'super_admin') return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.PORKBUN_API_KEY || !c.env?.PORKBUN_SECRET_KEY) return c.json({ error: 'Porkbun credentials not configured' }, 503)
+  if (!c.env?.DB) return c.json({ error: 'Database unavailable' }, 503)
+  const { domain, keyword, territory, company_key } = await c.req.json() as {
+    domain: string; keyword?: string; territory?: string; company_key?: string
+  }
+  if (!domain) return c.json({ error: 'domain required' }, 400)
+
+  const steps: Array<{ step: string; status: 'ok' | 'error' | 'pending'; detail?: string }> = []
+  const now = new Date().toISOString()
+
+  // Step 1 — Register on Porkbun
+  try {
+    const reg = await porkbunPost(c.env, `/domain/create/${domain}`, {
+      years: '1', autorenew: '1', agreement: 'yes', agreeToTerms: 'yes'
+    })
+    if (reg.status !== 'SUCCESS') {
+      steps.push({ step: 'register', status: 'error', detail: reg.message || JSON.stringify(reg) })
+      return c.json({ error: 'Registration failed', detail: reg.message, steps }, 400)
+    }
+    steps.push({ step: 'register', status: 'ok', detail: `${domain} registered on Porkbun` })
+  } catch (err: any) {
+    steps.push({ step: 'register', status: 'error', detail: err?.message })
+    return c.json({ error: 'Porkbun API error', steps }, 500)
+  }
+
+  // Step 2 — DNS CNAME @ → pages project
+  try {
+    const dns = await porkbunPost(c.env, `/dns/create/${domain}`, {
+      type: 'CNAME', host: '@', answer: 'services-leads-marketing-hub.pages.dev', ttl: '600'
+    })
+    const ok = dns.status === 'SUCCESS'
+    steps.push({ step: 'dns_cname', status: ok ? 'ok' : 'error', detail: ok ? '@ CNAME → services-leads-marketing-hub.pages.dev (TTL 600)' : dns.message })
+  } catch (err: any) {
+    steps.push({ step: 'dns_cname', status: 'error', detail: err?.message })
+  }
+
+  // Step 3 — Add custom domain to CF Pages
+  if (c.env?.CLOUDFLARE_API_TOKEN && c.env?.CLOUDFLARE_ACCOUNT_ID) {
+    try {
+      const cfRes = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${c.env.CLOUDFLARE_ACCOUNT_ID}/pages/projects/services-leads-marketing-hub/domains`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${c.env.CLOUDFLARE_API_TOKEN}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: domain })
+        }
+      )
+      const cfData: any = await cfRes.json()
+      const ok = cfData.success === true
+      steps.push({ step: 'cf_custom_domain', status: ok ? 'ok' : 'error', detail: ok ? 'Pending HTTP validation by Cloudflare' : (cfData.errors?.[0]?.message || JSON.stringify(cfData.errors)) })
+    } catch (err: any) {
+      steps.push({ step: 'cf_custom_domain', status: 'error', detail: err?.message })
+    }
+  } else {
+    steps.push({ step: 'cf_custom_domain', status: 'pending', detail: 'CLOUDFLARE_API_TOKEN not set — add domain manually in CF Pages Dashboard → Custom Domains' })
+  }
+
+  // Step 4 — Save to domain_registrations
+  try {
+    const expiresAt = new Date(Date.now() + 365.25 * 86400000).toISOString().split('T')[0]
+    await c.env.DB.prepare(
+      'INSERT OR REPLACE INTO domain_registrations (company_id,domain,tld,registrar,status,expires_at,auto_renew,whois_privacy,dns_configured,labels,imported_at,updated_at,created_at) VALUES (?,?,?,?,?,?,1,1,1,?,?,?,?)'
+    ).bind(0, domain, domain.split('.').pop() || '', 'porkbun', 'ACTIVE', expiresAt, '[]', now, now, now).run()
+    steps.push({ step: 'save_registrations', status: 'ok', detail: 'Saved to domain_registrations with dns_configured=1' })
+  } catch (err: any) {
+    steps.push({ step: 'save_registrations', status: 'error', detail: err?.message })
+  }
+
+  // Step 5 — Add to domains table (status=Building)
+  try {
+    await c.env.DB.prepare(
+      'INSERT OR IGNORE INTO domains (domain, keyword, status, company, authorized, owned_by_tenant) VALUES (?, ?, ?, ?, 0, 0)'
+    ).bind(domain, keyword || '', 'Building', company_key || null).run()
+    const label = company_key ? `company: ${company_key}` : 'unassigned — edit in Domain Army'
+    steps.push({ step: 'add_to_army', status: 'ok', detail: `Added to Domain Army (Building, ${label})` })
+  } catch (err: any) {
+    steps.push({ step: 'add_to_army', status: 'error', detail: err?.message })
+  }
+
+  return c.json({ success: true, domain, steps })
 })
 
 // ── LP TEMPLATES ─────────────────────────────────────────────────────────

@@ -1079,6 +1079,48 @@
     .prosp-field-val { color:var(--tx2);word-break:break-all; }
     .prosp-source { display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;background:var(--bg-s);border:1px solid var(--bd);color:var(--tx3); }
 
+    /* ── DOMAIN PANE ACTION BAR ── */
+    #domain-action-bar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+
+    /* ── DOMAIN BUY + IMPORT MODALS ── */
+    #buy-domain-modal, #import-porkbun-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(5,10,20,0.75);
+      z-index: 800; overflow-y: auto;
+      padding: 40px 20px;
+      align-items: flex-start; justify-content: center;
+    }
+    #buy-domain-modal > .card, #import-porkbun-modal > .card {
+      max-width: 700px; width: 100%; margin: 0 auto;
+      animation: modal-in .18s var(--ease-out);
+    }
+    .bd-result-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-radius: var(--r);
+      background: var(--bg-s); border: 1px solid var(--bd);
+      margin-bottom: 8px; flex-wrap: wrap;
+    }
+    .bd-result-row.bd-selected { border-color: var(--accent); background: rgba(204,0,0,0.07); }
+    .bd-domain  { font-weight: 700; font-size: 13px; color: var(--tx); flex: 1; min-width: 160px; }
+    .bd-avail-yes { color: #4ade80; font-size: 12px; font-weight: 700; }
+    .bd-avail-no  { color: var(--tx3); font-size: 12px; }
+    .bd-price { font-size: 12px; color: var(--tx2); }
+    .bd-select-btn { font-size: 12px; padding: 5px 12px; }
+    .bd-step { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; font-size: 13px; border-bottom: 1px solid var(--bd); }
+    .bd-step:last-child { border-bottom: none; }
+    .bd-step-ok    .bd-step-icon { color: #4ade80; }
+    .bd-step-error .bd-step-icon { color: #f87171; }
+    .bd-step-pending .bd-step-icon { color: #F59E0B; }
+    .bd-step-name { font-weight: 700; text-transform: capitalize; color: var(--tx); min-width: 140px; }
+    .bd-step-detail { font-size: 12px; color: var(--tx3); }
+    .im-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .im-table th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--bd); color: var(--tx3); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+    .im-table td { padding: 8px 10px; border-bottom: 1px solid var(--bd); color: var(--tx); }
+    .im-table tr.im-new  td { color: var(--tx); }
+    .im-table tr.im-have td { color: var(--tx3); }
+    .im-badge-new  { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-full); background: rgba(74,222,128,.15); color: #4ade80; }
+    .im-badge-have { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-full); background: var(--bg-s); color: var(--tx3); }
+
     /* ── TENANT INVITE MODAL OVERLAY ── */
     #tn-modal-overlay {
       display: none; position: fixed; inset: 0;
@@ -1284,6 +1326,12 @@
           <button class="ftab" onclick="filterDomains('Parked',this)">Parked</button>
           <button class="ftab" onclick="filterDomains('pending',this)" style="color:#F59E0B">⏳ Pending</button>
         </div>
+        <!-- Domain action bar — super_admin only -->
+        <div class="super-nav" id="domain-action-bar" style="display:none">
+          <button class="btn btn-primary btn-sm" onclick="openBuyDomainModal()">+ Buy Domain</button>
+          <button class="btn btn-sec btn-sm" onclick="openImportModal()">⬇ Import from Porkbun</button>
+        </div>
+
         <div class="tbl-wrap">
           <table>
             <thead><tr><th>Domain</th><th>Keyword</th><th>Service</th><th>Company</th><th>Budget</th><th>Status</th><th>P</th><th>Auth</th><th>Actions</th></tr></thead>
@@ -2286,6 +2334,121 @@
     </div><!-- /content -->
   </div><!-- /main-wrap -->
 </div><!-- /layout -->
+
+<!-- Buy Domain Modal Overlay -->
+<div id="buy-domain-modal" onclick="bdOverlayClick(event)">
+  <div class="card">
+    <div class="card-hd">
+      <div class="card-title">+ Buy New Domain</div>
+      <div class="card-actions">
+        <button class="btn btn-sec btn-sm" onclick="closeBuyDomainModal()">✕ Close</button>
+      </div>
+    </div>
+
+    <!-- Step 1: Search availability -->
+    <div id="bd-step-search" style="padding:0 4px 4px">
+      <div class="co-form-grid" style="margin-bottom:16px">
+        <div class="ff">
+          <label>Keyword</label>
+          <input type="text" id="bd-keyword" placeholder="e.g. basement flood" onkeydown="if(event.key==='Enter')bdCheckDomains()">
+        </div>
+        <div class="ff">
+          <label>City</label>
+          <input type="text" id="bd-city" placeholder="e.g. Ottawa" onkeydown="if(event.key==='Enter')bdCheckDomains()">
+        </div>
+        <div class="ff">
+          <label>Territory slug <span style="font-size:10px;color:var(--tx3)">auto-filled from city</span></label>
+          <input type="text" id="bd-territory" placeholder="e.g. ottawa">
+        </div>
+        <div class="ff">
+          <label>Assign to Company <span style="font-size:10px;color:var(--tx3)">optional</span></label>
+          <select id="bd-company">
+            <option value="">— Unassigned (Building) —</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;align-items:center;margin-bottom:14px">
+        <span style="font-size:12px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.05em">Extensions</span>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--tx2);cursor:pointer"><input type="checkbox" id="bd-ca"  checked> .ca</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--tx2);cursor:pointer"><input type="checkbox" id="bd-com" checked> .com</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:13px;color:var(--tx2);cursor:pointer"><input type="checkbox" id="bd-net"> .net</label>
+      </div>
+      <div class="btn-row" style="margin-bottom:12px">
+        <button class="btn btn-primary" id="bd-check-btn" onclick="bdCheckDomains()">🔍 Check Availability</button>
+      </div>
+      <div id="bd-status" style="font-size:12px;color:var(--tx3);min-height:18px;margin-bottom:8px"></div>
+      <div id="bd-results"></div>
+    </div>
+
+    <!-- Step 2: Confirm + purchase (shown after selecting a domain) -->
+    <div id="bd-step-purchase" style="display:none;padding:0 4px 4px">
+      <div id="bd-confirm-box" style="background:var(--bg-s);border:1px solid var(--bd);border-radius:var(--r);padding:16px 20px;margin-bottom:16px">
+        <div style="font-size:15px;font-weight:800;color:var(--tx);margin-bottom:4px" id="bd-confirm-domain"></div>
+        <div style="font-size:13px;color:var(--tx2)" id="bd-confirm-detail"></div>
+        <div style="font-size:11px;color:var(--tx3);margin-top:6px">WHOIS privacy included free • Auto-renew enabled • DNS CNAME configured automatically</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="bd-buy-btn" onclick="bdPurchase()">💳 Confirm &amp; Purchase</button>
+        <button class="btn btn-sec" onclick="bdCancelSelect()">← Back to results</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Result summary (shown after purchase) -->
+    <div id="bd-step-result" style="display:none;padding:0 4px 4px">
+      <div id="bd-result-steps"></div>
+      <div class="btn-row" style="margin-top:16px">
+        <button class="btn btn-sec" onclick="closeBuyDomainModal()">Close</button>
+        <button class="btn btn-primary" onclick="showSection('landing')">→ LP Generator</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Import from Porkbun Modal Overlay -->
+<div id="import-porkbun-modal" onclick="imOverlayClick(event)">
+  <div class="card">
+    <div class="card-hd">
+      <div class="card-title">⬇ Import from Porkbun</div>
+      <div class="card-actions">
+        <button class="btn btn-sec btn-sm" onclick="closeImportModal()">✕ Close</button>
+      </div>
+    </div>
+
+    <div style="padding:0 4px 4px">
+      <div id="im-fetch-row" style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <button class="btn btn-primary" id="im-fetch-btn" onclick="imLoadDiff()">Fetch from Porkbun</button>
+        <span id="im-fetch-status" style="font-size:12px;color:var(--tx3)">Click to load all domains from your Porkbun account and compare with D1.</span>
+      </div>
+
+      <div id="im-diff-wrap" style="display:none">
+        <div id="im-summary" style="font-size:13px;color:var(--tx2);margin-bottom:12px;padding:10px 14px;background:var(--bg-s);border-radius:var(--r);border:1px solid var(--bd)"></div>
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;color:var(--tx2)">
+            <input type="checkbox" id="im-select-all" onchange="imToggleAll(this.checked)"> Select all new
+          </label>
+          <button class="btn btn-primary btn-sm" id="im-import-btn" onclick="imImportSelected()">⬇ Import Selected</button>
+          <span id="im-import-status" style="font-size:12px;color:var(--tx3)"></span>
+        </div>
+        <div style="max-height:400px;overflow-y:auto;border:1px solid var(--bd);border-radius:var(--r)">
+          <table class="im-table">
+            <thead>
+              <tr>
+                <th style="width:30px"></th>
+                <th>Domain</th>
+                <th>Expires</th>
+                <th>Auto-renew</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="im-table-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="im-result" style="display:none;margin-top:16px"></div>
+    </div>
+  </div>
+</div>
 
 <!-- Tenant Invite Modal Overlay — fixed, click backdrop to close -->
 <div id="tn-modal-overlay" onclick="tnOverlayClick(event)">

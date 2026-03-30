@@ -1337,6 +1337,277 @@ async function registerDomain(domain, price) {
   }
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUY DOMAIN MODAL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let _bdSelectedDomain = null;
+let _bdSelectedPrice  = null;
+
+function openBuyDomainModal() {
+  const overlay = document.getElementById('buy-domain-modal');
+  if (!overlay) return;
+  // Reset all steps
+  ['bd-keyword','bd-city','bd-territory'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('bd-results').innerHTML = '';
+  document.getElementById('bd-status').textContent = '';
+  document.getElementById('bd-step-search').style.display = 'block';
+  document.getElementById('bd-step-purchase').style.display = 'none';
+  document.getElementById('bd-step-result').style.display   = 'none';
+  _bdSelectedDomain = null; _bdSelectedPrice = null;
+  // Load companies into bd-company selector
+  const sel = document.getElementById('bd-company');
+  if (sel && allCompanies.length) {
+    sel.innerHTML = '<option value="">— Unassigned (Building) —</option>' +
+      allCompanies.map(c => `<option value="${c.key}">${c.name}</option>`).join('');
+  }
+  // Auto-fill city → territory when city field changes
+  const cityEl = document.getElementById('bd-city');
+  const terrEl = document.getElementById('bd-territory');
+  if (cityEl && terrEl) {
+    cityEl.oninput = () => { if (!terrEl.value) terrEl.value = _normSlug(cityEl.value); };
+  }
+  overlay.style.display = 'flex';
+  overlay.scrollTop = 0;
+}
+
+function closeBuyDomainModal() {
+  const overlay = document.getElementById('buy-domain-modal');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function bdOverlayClick(e) {
+  if (e.target === document.getElementById('buy-domain-modal')) closeBuyDomainModal();
+}
+
+async function bdCheckDomains() {
+  const kw   = _normSlug(document.getElementById('bd-keyword')?.value);
+  const city = _normSlug(document.getElementById('bd-city')?.value);
+  if (!kw || !city) { toast('Enter keyword and city', 'error'); return; }
+
+  const exts = [];
+  if (document.getElementById('bd-ca')?.checked)  exts.push('ca');
+  if (document.getElementById('bd-com')?.checked) exts.push('com');
+  if (document.getElementById('bd-net')?.checked) exts.push('net');
+  if (!exts.length) { toast('Select at least one extension', 'error'); return; }
+
+  const patterns = [`${kw}${city}`, `${city}${kw}`, `${kw}in${city}`];
+  const domains  = [];
+  for (const pat of patterns) for (const ext of exts) domains.push(`${pat}.${ext}`);
+
+  const btn     = document.getElementById('bd-check-btn');
+  const statusEl = document.getElementById('bd-status');
+  const results  = document.getElementById('bd-results');
+  results.innerHTML = '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Checking…'; }
+
+  for (let i = 0; i < domains.length; i++) {
+    const dom = domains[i];
+    if (i > 0) {
+      for (let s = 11; s > 0; s--) {
+        if (statusEl) statusEl.textContent = `⏳ Rate limit — next check (${dom}) in ${s}s…`;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    if (statusEl) statusEl.textContent = `🔍 Checking ${dom}…`;
+    try {
+      const r = await fetch('/api/domains/check-availability', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+        body: JSON.stringify({ domain: dom })
+      });
+      const d = await r.json();
+      _bdRenderResult(results, d.results?.[0] || { domain: dom, status: 'ERROR' });
+    } catch (e) {
+      _bdRenderResult(results, { domain: dom, status: 'ERROR', error: e.message });
+    }
+  }
+  if (statusEl) statusEl.textContent = `✅ Done — ${domains.length} domains checked.`;
+  if (btn) { btn.disabled = false; btn.textContent = '🔍 Check Availability'; }
+}
+
+function _bdRenderResult(container, res) {
+  const avail = res.response?.avail === 'yes';
+  const price = res.response?.price || null;
+  const row   = document.createElement('div');
+  row.className = 'bd-result-row';
+  row.id = `bd-row-${res.domain.replace(/\./g,'-')}`;
+  row.innerHTML = `
+    <span class="bd-domain">${res.domain}</span>
+    ${res.status === 'SUCCESS'
+      ? avail
+        ? `<span class="bd-avail-yes">✅ Available</span>
+           <span class="bd-price">$${price}/yr</span>
+           <button class="btn btn-primary bd-select-btn" onclick="bdSelectDomain('${res.domain}','${price}')">Select →</button>`
+        : `<span class="bd-avail-no">❌ Taken</span>`
+      : `<span class="bd-avail-no">⚠ Error</span><span class="bd-price" style="color:var(--tx3)">${res.error||''}</span>`
+    }`;
+  container.appendChild(row);
+}
+
+function bdSelectDomain(domain, price) {
+  _bdSelectedDomain = domain; _bdSelectedPrice  = price;
+  document.getElementById('bd-confirm-domain').textContent = domain;
+  document.getElementById('bd-confirm-detail').textContent = `$${price}/yr — 1 year registration`;
+  document.getElementById('bd-step-search').style.display   = 'none';
+  document.getElementById('bd-step-purchase').style.display = 'block';
+}
+
+function bdCancelSelect() {
+  _bdSelectedDomain = null; _bdSelectedPrice = null;
+  document.getElementById('bd-step-search').style.display   = 'block';
+  document.getElementById('bd-step-purchase').style.display = 'none';
+}
+
+async function bdPurchase() {
+  if (!_bdSelectedDomain) return;
+  const btn = document.getElementById('bd-buy-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Processing…'; }
+  const companyKey = document.getElementById('bd-company')?.value || null;
+  const keyword    = document.getElementById('bd-keyword')?.value.trim() || '';
+  const territory  = document.getElementById('bd-territory')?.value.trim() || _normSlug(document.getElementById('bd-city')?.value || '');
+
+  try {
+    const r = await fetch('/api/domains/buy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ domain: _bdSelectedDomain, keyword, territory, company_key: companyKey || undefined })
+    });
+    const d = await r.json();
+    if (btn) { btn.disabled = false; btn.textContent = '💳 Confirm & Purchase'; }
+
+    const stepsHtml = (d.steps || []).map(s => `
+      <div class="bd-step bd-step-${s.status}">
+        <span class="bd-step-icon">${s.status==='ok'?'✅':s.status==='error'?'❌':'⏳'}</span>
+        <span class="bd-step-name">${s.step.replace(/_/g,' ')}</span>
+        ${s.detail ? `<span class="bd-step-detail">— ${s.detail}</span>` : ''}
+      </div>`).join('');
+
+    const allOk  = (d.steps||[]).every(s => s.status !== 'error');
+    const header = d.error
+      ? `<div style="color:#f87171;font-weight:700;margin-bottom:12px">❌ ${d.error}${d.detail?` — ${d.detail}`:''}</div>`
+      : `<div style="color:#4ade80;font-weight:800;font-size:15px;margin-bottom:12px">✅ ${_bdSelectedDomain} ${allOk?'registered successfully!':'registered (some steps need attention)'}</div>`;
+
+    document.getElementById('bd-result-steps').innerHTML = header + `<div style="background:var(--bg-s);border:1px solid var(--bd);border-radius:var(--r);padding:12px 16px">${stepsHtml}</div>
+      <div style="margin-top:12px;font-size:12px;color:var(--tx3)">
+        LP generation and activation are manual — go to LP Generator to generate for this domain.
+      </div>`;
+    document.getElementById('bd-step-purchase').style.display = 'none';
+    document.getElementById('bd-step-result').style.display   = 'block';
+
+    if (!d.error) {
+      toast(`${_bdSelectedDomain} registered! 🎉`, 'success');
+      loadDomains(); loadSyncStatus();
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '💳 Confirm & Purchase'; }
+    toast('Purchase failed: ' + e.message, 'error');
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPORT FROM PORKBUN MODAL
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function openImportModal() {
+  const overlay = document.getElementById('import-porkbun-modal');
+  if (!overlay) return;
+  document.getElementById('im-diff-wrap').style.display = 'none';
+  document.getElementById('im-result').style.display    = 'none';
+  document.getElementById('im-fetch-status').textContent = 'Click to load all domains from your Porkbun account and compare with D1.';
+  document.getElementById('im-table-body').innerHTML    = '';
+  document.getElementById('im-import-status').textContent = '';
+  const selectAll = document.getElementById('im-select-all');
+  if (selectAll) selectAll.checked = false;
+  overlay.style.display = 'flex';
+  overlay.scrollTop = 0;
+}
+
+function closeImportModal() {
+  const overlay = document.getElementById('import-porkbun-modal');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function imOverlayClick(e) {
+  if (e.target === document.getElementById('import-porkbun-modal')) closeImportModal();
+}
+
+async function imLoadDiff() {
+  const btn    = document.getElementById('im-fetch-btn');
+  const status = document.getElementById('im-fetch-status');
+  if (btn)    { btn.disabled = true; btn.textContent = '⏳ Fetching…'; }
+  if (status) status.textContent = 'Connecting to Porkbun…';
+
+  try {
+    const r = await fetch('/api/porkbun/fetch-list', {
+      headers: { 'Authorization': `Bearer ${getStoredToken()}` }
+    });
+    const d = await r.json();
+    if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+    if (d.error) { if (status) status.textContent = `❌ ${d.error}`; return; }
+
+    if (status) status.textContent = `Loaded ${d.total} domains from Porkbun.`;
+
+    const summaryEl = document.getElementById('im-summary');
+    summaryEl.innerHTML = `
+      <span style="color:#4ade80;font-weight:700">${d.new_count} new</span>
+      <span style="color:var(--tx3)"> &nbsp;·&nbsp; </span>
+      <span style="color:var(--tx3)">${d.total - d.new_count} already in D1</span>
+      <span style="color:var(--tx3)"> &nbsp;·&nbsp; ${d.total} total in Porkbun</span>`;
+
+    const tbody = document.getElementById('im-table-body');
+    tbody.innerHTML = (d.domains || []).map(dom => `
+      <tr class="${dom.in_d1 ? 'im-have' : 'im-new'}">
+        <td>${dom.in_d1 ? '<span class="im-badge-have">✓</span>' : `<input type="checkbox" class="im-cb" value="${dom.domain}" checked>`}</td>
+        <td style="font-weight:${dom.in_d1?'400':'700'}">${dom.domain}</td>
+        <td>${dom.expiry || '—'}</td>
+        <td>${dom.autorenew ? '<span style="color:#4ade80">Yes</span>' : '<span style="color:var(--tx3)">No</span>'}</td>
+        <td>${dom.in_d1 ? '<span class="im-badge-have">Already imported</span>' : '<span class="im-badge-new">New</span>'}</td>
+      </tr>`).join('');
+
+    document.getElementById('im-diff-wrap').style.display = 'block';
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+    if (status) status.textContent = `❌ Error: ${e.message}`;
+  }
+}
+
+function imToggleAll(checked) {
+  document.querySelectorAll('#im-table-body .im-cb').forEach(cb => cb.checked = checked);
+}
+
+async function imImportSelected() {
+  const selected = [...document.querySelectorAll('#im-table-body .im-cb:checked')].map(cb => cb.value);
+  if (!selected.length) { toast('Select at least one domain to import', 'error'); return; }
+
+  const btn    = document.getElementById('im-import-btn');
+  const status = document.getElementById('im-import-status');
+  if (btn)    { btn.disabled = true; btn.textContent = '⏳ Importing…'; }
+  if (status) status.textContent = `Importing ${selected.length} domain${selected.length>1?'s':''}…`;
+
+  try {
+    const r = await fetch('/api/porkbun/import-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ selected })
+    });
+    const d = await r.json();
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Import Selected'; }
+
+    if (d.error) { if (status) status.textContent = `❌ ${d.error}`; toast(d.error, 'error'); return; }
+
+    const resultEl = document.getElementById('im-result');
+    resultEl.innerHTML = `<div class="success-box">✅ ${d.inserted} domain${d.inserted!==1?'s':''} imported, ${d.updated} updated.</div>`;
+    resultEl.style.display = 'block';
+    if (status) status.textContent = '';
+    toast(`${d.inserted} domain${d.inserted!==1?'s':''} imported ✓`, 'success');
+    loadDomains(); loadSyncStatus();
+    // Refresh diff after import
+    setTimeout(() => imLoadDiff(), 800);
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ Import Selected'; }
+    if (status) status.textContent = `❌ ${e.message}`;
+    toast('Import failed: ' + e.message, 'error');
+  }
+}
+
 function renderExpiryAlerts(alerts) {
   const wrap = document.getElementById('expiry-alerts-wrap');
   if (!wrap || !alerts.length) return;
