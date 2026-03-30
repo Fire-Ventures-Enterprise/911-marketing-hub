@@ -2255,10 +2255,10 @@ async function saveTenantDetail(id) {
 }
 
 async function showInviteModal() {
-  const card = document.getElementById('tn-invite-card');
-  if (!card) return;
+  const overlay = document.getElementById('tn-modal-overlay');
+  if (!overlay) return;
 
-  // Show the modal IMMEDIATELY — never block on async plan loading
+  // Reset form BEFORE showing — never block on async plan loading
   ['tn-f-name','tn-f-email','tn-f-fee','tn-f-maxd','tn-f-maxu','tn-f-notes'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
@@ -2266,13 +2266,15 @@ async function showInviteModal() {
   const errEl = document.getElementById('tn-invite-error');
   if (resEl) resEl.style.display = 'none';
   if (errEl) errEl.style.display = 'none';
-  card.style.display = 'block';
-  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  // Show fixed overlay immediately — visible on top of any pane
+  overlay.style.display = 'flex';
+  overlay.scrollTop = 0;
 
   // Load subscription plans async (modal is already visible)
   if (!_tnPlans.length) {
     try {
-      const r = await fetch('/api/subscription-plans');
+      const r = await fetch('/api/subscription-plans', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
       const d = await r.json();
       _tnPlans = d.plans || [];
       const sel = document.getElementById('tn-f-plan');
@@ -2288,7 +2290,13 @@ async function showInviteModal() {
 }
 
 function hideInviteModal() {
-  document.getElementById('tn-invite-card').style.display = 'none';
+  const overlay = document.getElementById('tn-modal-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function tnOverlayClick(e) {
+  // Close modal when clicking the dark backdrop (not inside the card)
+  if (e.target === document.getElementById('tn-modal-overlay')) hideInviteModal();
 }
 
 function tnPlanChanged() {
