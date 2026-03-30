@@ -361,18 +361,62 @@
     .tpl-card { border:1px solid var(--bd); border-radius:8px; padding:14px; cursor:pointer; transition:border-color .15s; }
     .tpl-card:hover { border-color:var(--ac); }
     .tpl-card.selected { border-color:var(--ac); background:rgba(59,130,246,.06); }
-    /* Reviews pane */
-    .rv-row { border:1px solid var(--bd); border-left:4px solid var(--ac); border-radius:8px; padding:14px 16px; display:grid; grid-template-columns:1fr auto; gap:12px; align-items:start; }
-    .rv-row-stars { color:#f59e0b; font-size:15px; margin-bottom:4px; }
-    .rv-row-text { font-size:14px; color:var(--txt1); line-height:1.6; margin-bottom:8px; font-style:italic; }
-    .rv-row-meta { font-size:12px; color:var(--txt3); }
-    .rv-row-meta strong { color:var(--txt2); }
-    .rv-feat-badge { display:inline-block; background:rgba(74,222,128,.15); color:#4ade80; border:1px solid rgba(74,222,128,.3); font-size:10px; font-weight:700; padding:2px 7px; border-radius:10px; }
-    .rv-search-result { border:1px solid var(--bd); border-radius:8px; padding:12px 16px; cursor:pointer; transition:border-color .15s,background .15s; margin-bottom:8px; }
-    .rv-search-result:hover { border-color:var(--ac); background:rgba(59,130,246,.04); }
-    .rv-search-name { font-weight:700; font-size:14px; color:var(--txt1); }
-    .rv-search-addr { font-size:12px; color:var(--txt3); margin-top:2px; }
-    .rv-search-rating { font-size:12px; color:#f59e0b; margin-top:4px; }
+    /* ── REVIEWS PANE ── */
+    .rv-row {
+      border: 1px solid var(--bd); border-left: 4px solid var(--accent);
+      border-radius: 8px; padding: 14px 16px;
+      display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: start;
+      transition: box-shadow .2s ease;
+    }
+    .rv-row:hover { box-shadow: 0 3px 12px rgba(0,0,0,.28); }
+    .rv-row-stars { color: #f59e0b; font-size: 15px; margin-bottom: 4px; }
+    .rv-row-text  { font-size: 14px; color: var(--tx); line-height: 1.6; margin-bottom: 8px; font-style: italic; }
+    .rv-row-meta  { font-size: 12px; color: var(--tx3); }
+    .rv-row-meta strong { color: var(--tx2); }
+    /* ✓ Verified Google Review label */
+    .rv-verified {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 10px; font-weight: 700; color: #60a5fa;
+      margin-top: 6px;
+    }
+    .rv-verified a { color: var(--tx3); text-decoration: underline; font-weight: 400; transition: color var(--t-fast); }
+    .rv-verified a:hover { color: #60a5fa; }
+    /* Featured badge */
+    .rv-feat-badge {
+      display: inline-block; background: rgba(74,222,128,.15); color: #4ade80;
+      border: 1px solid rgba(74,222,128,.3); font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 10px;
+    }
+    /* Search result cards — "This is my business" button per result */
+    .rv-search-result {
+      border: 1px solid var(--bd); border-radius: 8px; padding: 14px 16px;
+      transition: border-color var(--t-fast), background var(--t-fast), box-shadow var(--t-fast);
+      margin-bottom: 8px;
+    }
+    .rv-search-result:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+    .rv-search-name   { font-weight: 700; font-size: 14px; color: var(--tx); }
+    .rv-search-addr   { font-size: 12px; color: var(--tx3); margin-top: 3px; }
+    .rv-search-rating { font-size: 12px; color: #f59e0b; margin-top: 4px; margin-bottom: 10px; }
+    /* Step indicator */
+    .rv-step { margin-bottom: 16px; }
+    .rv-step-label {
+      font-size: 11px; font-weight: 700; color: var(--tx3);
+      text-transform: uppercase; letter-spacing: .07em;
+      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+    }
+    .rv-step-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: var(--accent); color: #fff; font-size: 10px; font-weight: 900; flex-shrink: 0;
+    }
+    /* Connected profile box */
+    .rv-connected-box {
+      background: rgba(74,222,128,.07); border: 1px solid rgba(74,222,128,.22);
+      border-radius: 8px; padding: 12px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    }
+    .rv-connected-name { font-weight: 700; font-size: 14px; color: var(--tx); margin-bottom: 3px; }
+    .rv-connected-meta { font-size: 12px; color: var(--tx3); }
     .checklist-wrap { margin-top:12px; border:1px solid var(--bd); border-radius:8px; overflow:hidden; }
     .checklist-hd { padding:10px 16px; background:var(--bg-s); font-size:13px; font-weight:700; display:flex; gap:16px; }
     .checklist-body { padding:12px 16px; display:grid; grid-template-columns:1fr 1fr; gap:4px 24px; font-size:12px; }
@@ -1625,60 +1669,67 @@
 
       <!-- ── REVIEWS ── -->
       <div class="pane" id="pane-reviews">
-        <div class="ph"><h2>⭐ Google Reviews</h2><p>Real reviews from Google Business Profile — synced via Google Places API. Zero fake reviews.</p></div>
+        <div class="ph"><h2>⭐ Google Reviews</h2><p>Real verified reviews from Google Business Profile — synced via Google Places API. Zero fake reviews.</p></div>
 
-        <!-- API key status banner -->
+        <!-- API key status banner (shown when key missing) -->
         <div id="reviews-api-banner" style="display:none;background:#1e3a5f;border:1px solid #2563eb;border-radius:8px;padding:16px 20px;margin-bottom:20px">
           <div style="font-weight:700;color:#93c5fd;margin-bottom:6px">🔑 Google Places API Key Required</div>
           <div style="font-size:13px;color:#bfdbfe;line-height:1.6">
             Enable <strong>Google Places API (New)</strong> in Google Cloud Console, then run:<br>
-            <code style="background:#0f2744;padding:4px 10px;border-radius:4px;display:inline-block;margin-top:6px">echo "YOUR_KEY" | npx wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub</code><br>
+            <code style="background:#0f2744;padding:4px 10px;border-radius:4px;display:inline-block;margin-top:6px">wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub</code><br>
             <span style="color:#93c5fd">Then redeploy: <code style="background:#0f2744;padding:2px 8px;border-radius:4px">npm run deploy</code></span>
           </div>
         </div>
 
-        <!-- Per-company Google Business Profile connection -->
+        <!-- ── Connect / Status card ── -->
         <div class="card" style="margin-bottom:20px" id="reviews-connect-card">
           <div class="card-hd">
-            <div class="card-title">Connect Google Business Profile</div>
+            <div class="card-title">Google Business Profile</div>
           </div>
-          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:flex-end;margin-bottom:16px">
-            <div>
-              <label class="form-label">Company</label>
-              <select class="form-input" id="rv-company-sel" onchange="rvLoadProfile()">
-                <option value="">— Select Company —</option>
-              </select>
-            </div>
+
+          <!-- Step 1: Company selector -->
+          <div class="rv-step">
+            <div class="rv-step-label"><span class="rv-step-num">1</span> Select Company</div>
+            <select id="rv-company-sel" onchange="rvLoadProfile()" style="max-width:360px">
+              <option value="">— Select Company —</option>
+            </select>
           </div>
-          <!-- Profile status / search -->
-          <div id="rv-profile-status" style="margin-bottom:16px;font-size:13px;color:var(--txt3)">Select a company to view their Google Business Profile status.</div>
-          <div id="rv-search-section" style="display:none">
-            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:12px">
-              <input class="form-input" id="rv-search-input" type="text" placeholder="Search Google: e.g. 911 Restoration Ottawa">
-              <button class="btn btn-primary" onclick="rvSearchBusiness()">🔍 Search</button>
+
+          <!-- Profile status (populated by rvLoadProfile) -->
+          <div id="rv-profile-status" style="display:none;margin-top:4px"></div>
+
+          <!-- Step 2 + 3: Search — shown when no profile connected -->
+          <div id="rv-search-section" style="display:none;margin-top:16px">
+            <div class="rv-step">
+              <div class="rv-step-label"><span class="rv-step-num">2</span> Find your Google Business Profile</div>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
+                <input id="rv-search-input" type="text" placeholder="Type your business name — e.g. 911 Restoration Ottawa"
+                       onkeydown="if(event.key==='Enter')rvSearchBusiness()">
+                <button class="btn btn-primary" id="rv-search-btn" onclick="rvSearchBusiness()">🔍 Search</button>
+              </div>
             </div>
-            <div id="rv-search-results" style="display:none"></div>
+            <div id="rv-search-results" style="display:none;margin-top:4px"></div>
           </div>
         </div>
 
-        <!-- Reviews list + sync -->
+        <!-- ── Reviews list card (shown after profile connected) ── -->
         <div class="card" id="rv-list-card" style="display:none">
           <div class="card-hd">
             <div class="card-title" id="rv-list-title">Reviews</div>
             <div class="card-actions">
-              <span id="rv-sync-status" style="font-size:12px;color:var(--txt3)"></span>
+              <span id="rv-sync-status" style="font-size:12px;color:var(--tx3)"></span>
               <button class="btn btn-primary btn-sm" onclick="rvSync()">↻ Sync Now</button>
             </div>
           </div>
-          <!-- Profile stats bar -->
-          <div id="rv-stats-bar" style="display:flex;gap:24px;padding:12px 0;border-bottom:1px solid var(--bd);margin-bottom:16px;font-size:14px"></div>
-          <!-- Review rows -->
+          <!-- Stats bar: avg rating / total / Maps link -->
+          <div id="rv-stats-bar" style="display:flex;gap:24px;padding:12px 0;border-bottom:1px solid var(--bd);margin-bottom:16px;font-size:14px;flex-wrap:wrap"></div>
+          <!-- Review cards -->
           <div id="rv-rows" style="display:flex;flex-direction:column;gap:12px">
-            <div style="color:var(--txt3);font-size:13px">Loading reviews…</div>
+            <div style="color:var(--tx3);font-size:13px">Loading reviews…</div>
           </div>
         </div>
 
-        <!-- All companies overview (super_admin only) -->
+        <!-- ── All-companies overview (super_admin only) ── -->
         <div class="card" id="rv-overview-card" style="margin-top:20px">
           <div class="card-hd">
             <div class="card-title">All Companies — Google Reviews Status</div>
@@ -1686,7 +1737,7 @@
               <button class="btn btn-sec btn-sm" onclick="rvLoadOverview()">↻ Refresh</button>
             </div>
           </div>
-          <div id="rv-overview-rows" style="color:var(--txt3);font-size:13px">Loading…</div>
+          <div id="rv-overview-rows" style="color:var(--tx3);font-size:13px">Loading…</div>
         </div>
       </div>
 

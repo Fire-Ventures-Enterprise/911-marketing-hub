@@ -2379,6 +2379,45 @@ async function placesSearch(env: Bindings, query: string): Promise<any> {
   return res.json()
 }
 
+// POST /api/reviews/search-place — search Google Places with optional locationBias (New)
+// Body: { query: string, lat?: number, lng?: number }
+app.post('/api/reviews/search-place', async (c) => {
+  const user = c.get('user')
+  if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
+  if (!c.env?.GOOGLE_PLACES_API_KEY) return c.json({ error: 'GOOGLE_PLACES_API_KEY not configured — run: wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub' }, 503)
+  const { query, lat, lng } = await c.req.json()
+  if (!query) return c.json({ error: 'query required' }, 400)
+  try {
+    const body: any = { textQuery: query, maxResultCount: 5 }
+    if (lat && lng) {
+      body.locationBias = {
+        circle: { center: { latitude: Number(lat), longitude: Number(lng) }, radius: 50000 }
+      }
+    }
+    const res = await fetch(`${PLACES_BASE}/places:searchText`, {
+      method: 'POST',
+      headers: {
+        'X-Goog-Api-Key': c.env.GOOGLE_PLACES_API_KEY,
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.rating,places.userRatingCount,places.googleMapsUri',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    })
+    const data: any = await res.json()
+    const results = (data.places || []).map((p: any) => ({
+      place_id:      p.id,
+      name:          p.displayName?.text || '',
+      address:       p.formattedAddress || '',
+      rating:        p.rating || null,
+      total_reviews: p.userRatingCount || 0,
+      maps_url:      p.googleMapsUri || ''
+    }))
+    return c.json({ results })
+  } catch (err: any) {
+    return c.json({ error: 'Places search failed', detail: err?.message }, 500)
+  }
+})
+
 // POST /api/reviews/search-business — search Google Places by name/address
 app.post('/api/reviews/search-business', async (c) => {
   const user = c.get('user')

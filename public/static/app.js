@@ -1764,6 +1764,7 @@ async function coGbpSync() {
 // ── GOOGLE REVIEWS ────────────────────────────────────────────────────────
 
 let _rvSelectedCompanyId = null;
+let _rvProfileUrl = null;  // Google Maps URL for the currently loaded profile
 
 async function rvInit() {
   // Always ensure companies are loaded before rendering the dropdown
@@ -1806,41 +1807,60 @@ async function rvLoadProfile() {
   if (!cId) return;
   _rvSelectedCompanyId = cId;
 
-  const statusEl = document.getElementById('rv-profile-status');
-  const searchEl = document.getElementById('rv-search-section');
-  const listCard = document.getElementById('rv-list-card');
-  statusEl.textContent = 'Loading…';
+  const statusEl  = document.getElementById('rv-profile-status');
+  const searchEl  = document.getElementById('rv-search-section');
+  const listCard  = document.getElementById('rv-list-card');
+  const searchInp = document.getElementById('rv-search-input');
+  const searchRes = document.getElementById('rv-search-results');
+
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '<div style="color:var(--tx3);font-size:13px">Loading…</div>';
 
   const r = await fetch(`/api/reviews/${cId}`, { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
   const d = await r.json();
 
   if (d.profile) {
+    _rvProfileUrl = d.profile.profile_url || null;
     const lastSync = d.profile.last_synced ? new Date(d.profile.last_synced).toLocaleString() : 'Never';
-    statusEl.innerHTML = `<span style="color:#4ade80;font-weight:700">✅ Connected:</span> <strong>${d.profile.business_name}</strong> &nbsp;·&nbsp;
-      ⭐ ${d.profile.average_rating || '—'} &nbsp;·&nbsp; ${d.profile.total_reviews || 0} reviews &nbsp;·&nbsp;
-      <span style="color:var(--txt3)">Last sync: ${lastSync}</span>`;
+    statusEl.innerHTML = `
+      <div class="rv-connected-box">
+        <div>
+          <div class="rv-connected-name">✅ ${d.profile.business_name}</div>
+          <div class="rv-connected-meta">⭐ ${d.profile.average_rating || '—'} &nbsp;·&nbsp; ${d.profile.total_reviews || 0} total reviews &nbsp;·&nbsp; Last sync: ${lastSync}</div>
+        </div>
+        <button class="btn btn-sec btn-sm" onclick="rvShowSearch()" title="Search for a different business">✎ Change</button>
+      </div>`;
     searchEl.style.display = 'none';
-    // Show reviews list
     listCard.style.display = 'block';
     document.getElementById('rv-list-title').textContent = `Reviews — ${d.profile.business_name}`;
     rvRenderStats(d.profile);
     rvRenderRows(d.reviews || []);
   } else {
-    statusEl.innerHTML = `<span style="color:#f59e0b">⚠️ No Google Business Profile connected.</span> Search below to find and connect this company's profile.`;
+    _rvProfileUrl = null;
+    statusEl.innerHTML = `<div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.2);border-radius:8px;padding:10px 14px;font-size:13px;color:#fbbf24">⚠️ No Google Business Profile connected — search below to connect one.</div>`;
     searchEl.style.display = 'block';
     listCard.style.display = 'none';
-    document.getElementById('rv-search-input').value = '';
-    document.getElementById('rv-search-results').style.display = 'none';
+    if (searchInp) searchInp.value = '';
+    if (searchRes) searchRes.style.display = 'none';
   }
+}
+
+// Allow re-searching after profile connected (e.g. to change it)
+function rvShowSearch() {
+  const searchEl = document.getElementById('rv-search-section');
+  if (searchEl) { searchEl.style.display = 'block'; document.getElementById('rv-search-input')?.focus(); }
 }
 
 function rvRenderStats(profile) {
   const el = document.getElementById('rv-stats-bar');
   if (!el) return;
+  const mapsBtn = profile.profile_url
+    ? `<div style="display:flex;align-items:center"><a href="${profile.profile_url}" target="_blank" rel="noopener" style="color:#60a5fa;font-size:12px;text-decoration:none;border:1px solid rgba(96,165,250,.3);padding:5px 12px;border-radius:6px;white-space:nowrap">📍 View on Google Maps ↗</a></div>`
+    : '';
   el.innerHTML = `
-    <div><div style="font-size:22px;font-weight:900;color:var(--ac)">${profile.average_rating || '—'}</div><div style="font-size:11px;color:var(--txt3)">Avg Rating</div></div>
-    <div><div style="font-size:22px;font-weight:900;color:var(--ac)">${profile.total_reviews || 0}</div><div style="font-size:11px;color:var(--txt3)">Total Reviews</div></div>
-    <div><div style="font-size:12px;margin-top:4px"><a href="${profile.profile_url || '#'}" target="_blank" rel="noopener" style="color:#388bfd">View on Google Maps ↗</a></div></div>
+    <div><div style="font-size:22px;font-weight:900;color:var(--accent)">${profile.average_rating || '—'}</div><div style="font-size:11px;color:var(--tx3);margin-top:2px">Avg Rating</div></div>
+    <div><div style="font-size:22px;font-weight:900;color:var(--accent)">${profile.total_reviews || 0}</div><div style="font-size:11px;color:var(--tx3);margin-top:2px">Total Reviews</div></div>
+    ${mapsBtn}
   `;
 }
 
@@ -1848,18 +1868,23 @@ function rvRenderRows(reviews) {
   const el = document.getElementById('rv-rows');
   if (!el) return;
   if (!reviews.length) {
-    el.innerHTML = '<div style="color:var(--txt3);font-size:13px">No reviews synced yet. Click "Sync Now" to fetch from Google.</div>';
+    el.innerHTML = '<div style="color:var(--tx3);font-size:13px;padding:12px 0">No reviews synced yet — click "Sync Now" to fetch from Google.</div>';
     return;
   }
+  const mapsUrl = _rvProfileUrl || '';
   el.innerHTML = reviews.map(rv => {
-    const stars = '⭐'.repeat(rv.rating || 5);
-    const feat  = rv.featured ? '<span class="rv-feat-badge">Featured</span>' : '';
+    const stars     = '⭐'.repeat(Math.min(rv.rating || 5, 5));
+    const feat      = rv.featured ? '<span class="rv-feat-badge">★ Featured</span>' : '';
     const truncated = rv.review_text.length > 280 ? rv.review_text.slice(0, 277) + '…' : rv.review_text;
+    const mapsLink  = mapsUrl
+      ? `&nbsp;·&nbsp; <a href="${mapsUrl}" target="_blank" rel="noopener">View on Google Maps ↗</a>`
+      : '';
     return `<div class="rv-row">
       <div>
         <div class="rv-row-stars">${stars} ${feat}</div>
         <div class="rv-row-text">"${truncated}"</div>
         <div class="rv-row-meta"><strong>${rv.reviewer_name}</strong> &nbsp;·&nbsp; ${rv.relative_time || rv.review_date || ''}</div>
+        <div class="rv-verified">✓ Verified Google Review${mapsLink}</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
         <button class="btn btn-sm ${rv.featured ? 'btn-sec' : 'btn-primary'}" onclick="rvToggleFeatured(${rv.id},${rv.featured ? 0 : 1})">
@@ -1871,36 +1896,55 @@ function rvRenderRows(reviews) {
 }
 
 async function rvSearchBusiness() {
-  const query = document.getElementById('rv-search-input').value.trim();
-  if (!query) return;
-  const btn = document.querySelector('[onclick="rvSearchBusiness()"]');
-  if (btn) btn.textContent = 'Searching…';
+  const query = document.getElementById('rv-search-input')?.value.trim();
+  if (!query) { toast('Enter a business name to search', 'error'); return; }
+
+  const btn   = document.getElementById('rv-search-btn');
   const resEl = document.getElementById('rv-search-results');
+  if (btn) { btn.textContent = 'Searching…'; btn.disabled = true; }
   resEl.style.display = 'none';
 
-  const r = await fetch('/api/reviews/search-business', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
-    body: JSON.stringify({ query })
-  });
-  const d = await r.json();
-  if (btn) btn.textContent = '🔍 Search';
+  try {
+    const r = await fetch('/api/reviews/search-place', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ query })
+    });
+    const d = await r.json();
+    if (btn) { btn.textContent = '🔍 Search'; btn.disabled = false; }
 
-  if (d.error) {
-    const banner = document.getElementById('reviews-api-banner');
-    if (banner) banner.style.display = 'block';
-    toast(d.error, 'error'); return;
+    if (d.error) {
+      const banner = document.getElementById('reviews-api-banner');
+      if (banner) banner.style.display = 'block';
+      toast(d.error, 'error');
+      return;
+    }
+    if (!d.results || !d.results.length) {
+      resEl.innerHTML = '<div style="color:var(--tx3);font-size:13px;padding:12px 0">No results found — try a more specific name or include city (e.g. "911 Restoration Ottawa").</div>';
+      resEl.style.display = 'block';
+      return;
+    }
+
+    const stepLabel = `<div class="rv-step-label" style="margin-bottom:10px"><span class="rv-step-num">3</span> Select your business</div>`;
+    resEl.innerHTML = stepLabel + d.results.map(p => `
+      <div class="rv-search-result">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap">
+          <div style="flex:1;min-width:0">
+            <div class="rv-search-name">${p.name}</div>
+            <div class="rv-search-addr">${p.address}</div>
+            <div class="rv-search-rating">${p.rating ? `⭐ ${p.rating} (${(p.total_reviews || 0).toLocaleString()} reviews)` : 'No ratings yet'}</div>
+          </div>
+          <button class="btn btn-primary btn-sm" style="flex-shrink:0;white-space:nowrap"
+            onclick='rvConnectProfile(${JSON.stringify(p).replace(/'/g, "&#39;")})'>
+            This is my business
+          </button>
+        </div>
+      </div>`).join('');
+    resEl.style.display = 'block';
+  } catch {
+    if (btn) { btn.textContent = '🔍 Search'; btn.disabled = false; }
+    toast('Search failed — check your connection', 'error');
   }
-  if (!d.results || !d.results.length) {
-    resEl.innerHTML = '<div style="color:var(--txt3);font-size:13px;padding:12px 0">No results found — try a different search term.</div>';
-    resEl.style.display = 'block'; return;
-  }
-  resEl.innerHTML = d.results.map(p => `
-    <div class="rv-search-result" onclick='rvConnectProfile(${JSON.stringify(p)})'>
-      <div class="rv-search-name">${p.name}</div>
-      <div class="rv-search-addr">${p.address}</div>
-      <div class="rv-search-rating">⭐ ${p.rating || '—'} · ${p.total_reviews} reviews</div>
-    </div>`).join('');
-  resEl.style.display = 'block';
 }
 
 async function rvConnectProfile(place) {
@@ -1955,25 +1999,25 @@ async function rvLoadOverview() {
   const r = await fetch('/api/reviews', { headers: { 'Authorization': `Bearer ${getStoredToken()}` } });
   const d = await r.json();
   if (!d.profiles || !d.profiles.length) {
-    el.innerHTML = '<div style="color:var(--txt3);font-size:13px">No companies have connected a Google Business Profile yet.</div>';
+    el.innerHTML = '<div style="color:var(--tx3);font-size:13px">No companies have connected a Google Business Profile yet.</div>';
     return;
   }
-  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
-    <thead><tr style="border-bottom:1px solid var(--bd);color:var(--txt3)">
-      <th style="padding:8px 0;text-align:left">Company</th>
-      <th style="padding:8px 0;text-align:left">Business Profile</th>
-      <th style="padding:8px 0;text-align:center">Rating</th>
-      <th style="padding:8px 0;text-align:center">Reviews Stored</th>
-      <th style="padding:8px 0;text-align:left">Last Sync</th>
+  el.innerHTML = `<div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>Company</th>
+      <th>Business Profile</th>
+      <th style="text-align:center">Rating</th>
+      <th style="text-align:center">Reviews</th>
+      <th>Last Sync</th>
     </tr></thead>
-    <tbody>${d.profiles.map(p => `<tr style="border-bottom:1px solid var(--bd)">
-      <td style="padding:10px 0"><strong>${p.company_name}</strong></td>
-      <td style="padding:10px 0;color:var(--txt2)">${p.business_name}</td>
-      <td style="padding:10px 0;text-align:center">⭐ ${p.average_rating || '—'}</td>
-      <td style="padding:10px 0;text-align:center">${p.review_count || 0}</td>
-      <td style="padding:10px 0;color:var(--txt3)">${p.last_synced ? new Date(p.last_synced).toLocaleDateString() : 'Never'}</td>
+    <tbody>${d.profiles.map(p => `<tr>
+      <td><strong>${p.company_name}</strong></td>
+      <td>${p.business_name}</td>
+      <td style="text-align:center">⭐ ${p.average_rating || '—'}</td>
+      <td style="text-align:center">${p.review_count || 0}</td>
+      <td style="color:var(--tx3)">${p.last_synced ? new Date(p.last_synced).toLocaleDateString() : 'Never'}</td>
     </tr>`).join('')}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 function getStoredToken() {

@@ -249,13 +249,26 @@ Any reference to a specific company name, phone number, colour, or domain in app
 - **AggregateRating schema updated**: when real reviews are passed, schema uses computed `avgRating` + actual `reviewCount`; when no reviews, defaults to `4.9 / 127` (keeps schema valid without real data)
 - **`validateLP` function**: checks 16 conditions across Technical SEO, Schema, Conversion, Links, Reviews; returns `{ passed[], warnings[] }`; LP endpoint returns `checklist` in response JSON; admin UI shows green/yellow checklist below LP output; warnings are advisory — LP always generated regardless
 - **LP checklist review check**: passes if no `rv-placeholder` class in HTML (real reviews loaded); warns if placeholder shown (no profile connected)
-- **Reviews pane**: sidebar nav item "⭐ Reviews"; `pane-reviews` with connect-profile section, search-business UI, reviews list with featured toggle, stats bar, all-companies overview table
+- **GOOGLE REVIEWS DOCTRINE — smart business name search (updated 2026-03-29)**:
+  - Admin types business name (e.g. "911 Restoration Ottawa") — no manual URL paste ever
+  - `POST /api/reviews/search-place` calls Google Places API (New) `places:searchText` with optional `locationBias` `{ circle: { center: {lat,lng}, radius: 50000 } }` passed from frontend
+  - Returns up to 5 results: place_id, name, address, rating, total_reviews, maps_url
+  - Each result shows "This is my business" button (not a whole-card onclick)
+  - Admin clicks "This is my business" → `POST /api/reviews/connect/:company_id` saves to `google_business_profiles`
+  - Immediately auto-triggers `POST /api/reviews/sync/:company_id` → fetches + stores reviews
+  - Minimum 4 stars, 50 char text; top 5 auto-featured; 24-hr KV cache
+  - Review cards show: stars + Featured badge + review text + reviewer name + relative time + "✓ Verified Google Review" + "View on Google Maps" link
+  - `_rvProfileUrl` stored in frontend state after `rvLoadProfile()` — used in review card render without re-fetching
+  - `rvShowSearch()` allows "Change" after profile connected without D1 disconnect
+  - `POST /api/reviews/search-business` kept for backwards compat (inline GBP in Companies pane); new pane uses `search-place`
+- **Reviews pane**: sidebar nav item "⭐ Reviews"; step-based UI: Step 1=company selector, Step 2=search input, Step 3=results; connected state shows green `.rv-connected-box`; list card shows after connection; all-companies overview table (super_admin only uses `.tbl-wrap` classes)
 - **`rvInit()` populates company selector** from `allCompanies`; `rvLoadProfile()` checks if profile exists, shows search section if not; `rvSync()` calls `POST /api/reviews/sync/{company_id}`
 - **`getStoredToken()` helper** reads `slm_token` from cookie for API calls within reviews JS — avoids duplicating auth logic
-- **Reviews endpoint auth**: `POST /api/reviews/search-business`, `POST /api/reviews/connect/:id`, `POST /api/reviews/sync/:id` require `super_admin` or `company_admin`; company_admin scoped to their own company_id; `GET /api/reviews/:company_id` requires any authenticated user
+- **Reviews endpoint auth**: `POST /api/reviews/search-place`, `POST /api/reviews/search-business`, `POST /api/reviews/connect/:id`, `POST /api/reviews/sync/:id` require `super_admin` or `company_admin`; company_admin scoped to their own company_id; `GET /api/reviews/:company_id` requires any authenticated user
 - **`getLPReviews` fake review function kept** — still in codebase as fallback reference but never called from LP endpoint; remove in a future cleanup session
 - **`rvInit()` race condition**: `allCompanies` initialises as `[]` (empty array), which is truthy; guard `if (!allCompanies)` never fires; when Reviews tab is clicked before `loadCompanies()` resolves, the dropdown renders with zero options; fix: `if (!allCompanies.length) await loadCompanies()` at the top of `rvInit()`
 - **Role-based company selector in Reviews**: `company_admin` should see their own company pre-selected and the dropdown disabled; `super_admin`/`manager` see the full dropdown; always handle both cases in `rvInit()`; hide the all-companies overview card for `company_admin`
+- **CSS variable discipline**: all inline styles in JS must use `var(--tx)`, `var(--tx2)`, `var(--tx3)`, `var(--accent)` — never `var(--txt1)`, `var(--txt2)`, `var(--txt3)`, or `var(--ac)`; these wrong names produce invisible/unstyled elements in dark mode
 - **Company Management tab**: `🏢 Companies` sidebar nav item is `super_admin`-only — hidden with `style="display:none"` on element, revealed after `checkAuth()` resolves when `currentUser.role === 'super_admin'`; use class `co-mgmt-nav` on both the `<div class="sb-group">` and the `<button>` so both show/hide together
 - **`POST /api/companies` + `PATCH /api/companies/:id`**: both require `super_admin`; validate `key` with regex `/^[a-z0-9-]+$/`; handle UNIQUE constraint violation → 409 with friendly message; `callouts` and `sitelinks` are JSON-stringified before storage, never raw arrays
 - **`loadCompanyMgmt()`**: fetches `GET /api/reviews` to get GBP status for each company, populates `_coMgmtProfiles` map keyed by `company_id`; renders company table with inline GBP status badge; calls `loadCompanies()` if `allCompanies` is empty (same race fix as `rvInit`)
