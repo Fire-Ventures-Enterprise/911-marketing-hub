@@ -1184,11 +1184,11 @@ app.get('/api/domains', async (c) => {
   const user = c.get('user')
   const base = 'SELECT id, domain, keyword, service, budget, status, priority, notes, company AS co, category, authorized, authorized_by, authorized_at, owned_by_tenant FROM domains'
   let result
-  if (user && user.role !== 'super_admin' && user.company_key) {
-    result = await c.env.DB.prepare(base + ' WHERE company = ? ORDER BY authorized DESC, priority ASC, domain ASC').bind(user.company_key).all()
-  } else if (user && user.role !== 'super_admin') {
-    // Authenticated non-super_admin with no resolved company_key (new tenant, no domains yet)
-    return c.json({ total: 0, domains: [] })
+  if (user && user.role !== 'super_admin') {
+    // JOIN companies table on the TEXT key column — reliable even when company_key is null/mismatched
+    result = await c.env.DB.prepare(
+      'SELECT d.id, d.domain, d.keyword, d.service, d.budget, d.status, d.priority, d.notes, d.company AS co, d.category, d.authorized, d.authorized_by, d.authorized_at, d.owned_by_tenant FROM domains d JOIN companies c ON LOWER(d.company) = LOWER(c.key) WHERE c.id = ? ORDER BY d.authorized DESC, d.priority ASC, d.domain ASC'
+    ).bind(user.company_id).all()
   } else {
     result = await c.env.DB.prepare(base + ' ORDER BY authorized DESC, category ASC, priority ASC, domain ASC').all()
   }
@@ -2385,13 +2385,13 @@ app.post('/api/reviews/search-place', async (c) => {
   const user = c.get('user')
   if (!user || (user.role !== 'super_admin' && user.role !== 'company_admin')) return c.json({ error: 'Forbidden' }, 403)
   if (!c.env?.GOOGLE_PLACES_API_KEY) return c.json({ error: 'GOOGLE_PLACES_API_KEY not configured — run: wrangler pages secret put GOOGLE_PLACES_API_KEY --project-name services-leads-marketing-hub' }, 503)
-  const { query, lat, lng } = await c.req.json()
+  const { query, lat, lng, radius } = await c.req.json()
   if (!query) return c.json({ error: 'query required' }, 400)
   try {
     const body: any = { textQuery: query, maxResultCount: 5 }
     if (lat && lng) {
       body.locationBias = {
-        circle: { center: { latitude: Number(lat), longitude: Number(lng) }, radius: 50000 }
+        circle: { center: { latitude: Number(lat), longitude: Number(lng) }, radius: radius ? Number(radius) : 150000 }
       }
     }
     const res = await fetch(`${PLACES_BASE}/places:searchText`, {

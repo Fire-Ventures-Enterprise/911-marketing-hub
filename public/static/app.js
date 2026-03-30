@@ -1895,6 +1895,80 @@ function rvRenderRows(reviews) {
   }).join('');
 }
 
+async function rvExtractFromUrl() {
+  const url = document.getElementById('rv-maps-url-input')?.value.trim();
+  if (!url) { toast('Paste a Google Maps URL first', 'error'); return; }
+
+  // Extract lat/lng from Google Maps URL — handles ?q=lat,lng and !3d{lat}!4d{lng} formats
+  let lat = null, lng = null;
+
+  // Pattern 1: !3d{lat}!4d{lng}  (most common in /maps/place/ URLs)
+  const coord3d = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+  if (coord3d) { lat = coord3d[1]; lng = coord3d[2]; }
+
+  // Pattern 2: @lat,lng (fallback)
+  if (!lat) {
+    const atCoord = url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+    if (atCoord) { lat = atCoord[1]; lng = atCoord[2]; }
+  }
+
+  if (!lat || !lng) {
+    toast('Could not find coordinates in that URL — try copy the full Google Maps URL from the browser address bar', 'error');
+    return;
+  }
+
+  // Extract business name from URL path: /maps/place/Business+Name/
+  let query = '';
+  const namePart = url.match(/\/maps\/place\/([^/@?]+)/);
+  if (namePart) {
+    query = decodeURIComponent(namePart[1].replace(/\+/g, ' '));
+  }
+
+  // Fall back to whatever is typed in the search box
+  if (!query) query = document.getElementById('rv-search-input')?.value.trim() || 'business';
+
+  const btn = document.getElementById('rv-maps-url-btn');
+  const resEl = document.getElementById('rv-search-results');
+  if (btn) { btn.textContent = 'Searching…'; btn.disabled = true; }
+  resEl.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/reviews/search-place', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getStoredToken()}` },
+      body: JSON.stringify({ query, lat: Number(lat), lng: Number(lng), radius: 1000 })
+    });
+    const d = await r.json();
+    if (btn) { btn.textContent = 'Extract & Search'; btn.disabled = false; }
+
+    if (d.error) { toast(d.error, 'error'); return; }
+    if (!d.results || !d.results.length) {
+      resEl.innerHTML = '<div style="color:var(--tx3);font-size:13px;padding:12px 0">No results found near those coordinates — try using the text search above.</div>';
+      resEl.style.display = 'block';
+      return;
+    }
+
+    // Reuse same render as rvSearchBusiness
+    const stepLabel = `<div class="rv-step-label" style="margin-bottom:10px"><span class="rv-step-num">3</span> Select your business</div>`;
+    resEl.innerHTML = stepLabel + d.results.map(p => `
+      <div class="rv-search-result">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap">
+          <div style="flex:1;min-width:0">
+            <div class="rv-search-name">${p.name}</div>
+            <div class="rv-search-addr">${p.address}</div>
+            ${p.rating ? `<div class="rv-search-rating">⭐ ${p.rating} · ${p.total_reviews} reviews</div>` : ''}
+          </div>
+          <button class="btn btn-primary btn-sm" onclick='rvConnectProfile(${JSON.stringify(p)})'>This is my business</button>
+        </div>
+      </div>`).join('');
+    resEl.style.display = 'block';
+  } catch (err) {
+    if (btn) { btn.textContent = 'Extract & Search'; btn.disabled = false; }
+    toast('Search failed — check console', 'error');
+    console.error(err);
+  }
+}
+
 async function rvSearchBusiness() {
   const query = document.getElementById('rv-search-input')?.value.trim();
   if (!query) { toast('Enter a business name to search', 'error'); return; }
@@ -2254,6 +2328,8 @@ async function sendTenantInvite() {
   resEl.innerHTML = `✅ ${d.message}${!d.email_sent ? `<div class="invite-url-box">${d.invite_url}</div>` : ''}`;
   resEl.style.display = 'block';
   loadTenants();
+  toast('Invitation sent ✓', 'success');
+  setTimeout(() => hideInviteModal(), 3000);
 }
 
 async function impersonateTenant(tenantId) {

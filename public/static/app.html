@@ -1709,6 +1709,17 @@
               </div>
             </div>
             <div id="rv-search-results" style="display:none;margin-top:4px"></div>
+            <!-- Maps URL fallback -->
+            <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--brd)">
+              <div style="font-size:12px;color:var(--tx3);margin-bottom:8px">
+                Can't find your business? Paste your Google Maps URL instead:
+              </div>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:10px">
+                <input id="rv-maps-url-input" type="text" placeholder="https://www.google.com/maps/place/Your+Business/@45.4..."
+                       onkeydown="if(event.key==='Enter')rvExtractFromUrl()">
+                <button class="btn btn-sec" id="rv-maps-url-btn" onclick="rvExtractFromUrl()">Extract &amp; Search</button>
+              </div>
+            </div>
           </div>
         </div>
 
